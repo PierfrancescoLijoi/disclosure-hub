@@ -10,12 +10,12 @@ A modular monolith with hexagonal boundaries, in TypeScript end to end. One code
 `ROLE=api | worker | all` decides what a process does.
 
 ```
- React SPA ──REST (Zod)──▶ http ──▶ application ──▶ domain (pure)
+React SPA ──REST (Zod)──▶ http (OIDC bearer tokens) ──▶ application ──▶ domain (pure)
                                         │  │            ▲
                                         │  └──▶ jurisdictions (policy plug-ins)
                                         ▼
                                      ports ◀── adapters: db (SQLite | Postgres)
-                                                         queue (in-process | BullMQ/Redis)
+                                                         queue (in-process | Postgres LISTEN/NOTIFY | BullMQ/Redis)
                                                          gateways (mock RNS | mock EDGAR)
                                                          ai (mock | Anthropic)
 ```
@@ -98,7 +98,8 @@ quoted evidence for each. It is a separate table and a separate port, so it cann
 | Text timestamps and JSON text | One migration, two databases, identical tests | No DB-side JSON/time queries; a reporting layer would want real types |
 | DB row as truth, queue as hint | Survives Redis loss, simple reasoning | Sweeper adds up to one interval of latency after a lost wake-up; polling cost |
 | Hash chain per announcement | Cheap, local, verifiable | Does not stop a privileged actor rewriting history (needs external anchoring) |
-| Persona auth | No identity-provider work in a time-boxed build | Not a security boundary; authorization logic is real, authentication is not |
+| OIDC bearer tokens, roles from the token | Works unchanged with Entra ID and Keycloak; no passwords stored; MFA and Conditional Access stay the company's policy | A deployment serves one default company unless the token carries one; no per-role step-up for publish yet. `npm start` still has persona auth, enabled only in demo mode |
+| PostgreSQL `LISTEN/NOTIFY` as the queue in the small-company topology | No Redis to run, patch or pay for; the row is the truth anyway | Every worker is woken by every notification, so keep workers few (hard limit 6); a notification during a listener outage is lost and the sweeper recovers it |
 | Mock newswires with chaos modes | Failure paths are demonstrable and tested | Real RNS/EDGAR semantics (rejections, fee, test filings) are unknown until integrated |
 | Vite + React, not Next.js | Smaller, no server rendering needed | A deviation from the brief's example stack |
 
@@ -106,7 +107,7 @@ quoted evidence for each. It is a separate table and a separate port, so it cann
 
 What exists and was checked:
 
-- **Stateless API** processes behind any load balancer; all state in PostgreSQL.
+- **Stateless API** processes behind any load balancer; all state in PostgreSQL. A signed token is verified locally (cached keys), so authentication adds no shared state.
 - **Workers scale horizontally**: `docker compose up --scale worker=3` ran end to end, and a test runs two worker processes against one Postgres and one Redis over eight publications and asserts eight distinct releases, no duplicates.
 - **Backpressure and fairness** come from per-worker job concurrency and per-gateway concurrency.
 - **Hot paths are indexed row lookups.** The one scan, the sweeper, reads overdue publications in batches of 100.
@@ -128,16 +129,27 @@ The benchmark found a real artefact on its first run: the mock newswire allocate
 
 Not measured: more than 3 workers, a remote database, sustained load over hours, Redis or Postgres failure under load. The first limits I expect are the database connection pool and the sweeper scan; a partial index on non-terminal publications is the next step. These are laptop numbers, a trend and a method, not a capacity promise.
 
+**Sized for a small or medium company** (5 issuers, 300 people, ~300 announcements a month, a burst of 100 publications in 10 minutes, 10x headroom): [SIZING.md](SIZING.md) has the capacity model and the measurements under the Azure-sized resource limits with real OIDC sign-in and the PostgreSQL queue (about 15 publications a second with 2 workers against a 200 ms gateway, no failed attempts, no duplicates, 16 database connections), against a peak of 0.17 a second. The outside gateway, not this platform, is the ceiling.
+
 Next steps for real scale: partitioning or archiving the audit table, a connection pooler (PgBouncer), moving the queue enqueue into a transactional outbox, per-tenant (not only per-actor) quotas.
 
-### Deployment topology (designed, not applied)
+### Deployment topology: Compose is the local twin, Azure is written and validated offline
 
-Compose is the only environment I ran. The shape for a real deployment follows from the design and needs no code change:
+`docker-compose.yml` and `infra/azure` describe the same components (table at the top of each file), and the same image and settings names run in both:
 
-- API and worker as separate stateless deployments, at least two replicas each, spread across availability zones; workers scale on the *oldest waiting publication* metric rather than CPU.
-- PostgreSQL as a managed multi-AZ primary with a synchronous standby; Redis as a managed replicated cache. Redis loss is survivable by design (the sweeper rebuilds the queue from the database); database loss is not, so the database is where durability money goes.
-- Secrets (database URL, provider key) from a secret manager, not environment files; managed identity to the database where the platform allows it.
-- No Terraform or Kubernetes manifests are included: I could not validate them here, and unvalidated infrastructure code would claim more than I have verified.
+| Component | Local | Azure |
+|---|---|---|
+| Identity | Keycloak, PKCE for the browser, bearer tokens for scripts | Entra ID: two app registrations (API with five app roles, browser app as a PKCE-only public client), `app_role_assignment_required`, roles from groups |
+| API, worker | containers, `--scale worker=2` | Container Apps in a zone-redundant environment, 2 to 4 API and 2 to 3 worker replicas, health probes, scale on concurrent requests |
+| Schema | `migrate` one-shot | a Container Apps job run by the pipeline before each rollout, under a *different* identity from the runtime (the runtime cannot alter tables; the audit table is append-only for it) |
+| Database | PostgreSQL 16 | Flexible Server, zone-redundant HA, delegated subnet, no public endpoint, Entra authentication only, 14-day PITR, geo-redundant backup, locked against deletion |
+| Database credentials | a demo password | none: the managed identity's token is the password, refreshed per connection (`DATABASE_AUTH=azure-managed-identity`) |
+| Queue | `LISTEN/NOTIFY` | same; direct port 5432, not the built-in pooler |
+| Network | one compose network | VNet, a /23 for the containers (443 in), a /28 for the database that admits only that subnet |
+| Delivery | `docker compose up --build` | GitHub Actions with a federated credential, image promoted by digest, migrate, roll out, smoke test (written, not run) |
+| Operations | `/metrics`, logs | Log Analytics, 8 alerts (replicas below floor, restarts, 5xx, database CPU, storage, connections, a failed publication), budget |
+
+What is verified offline and what is not is in [infra/azure/README.md](../infra/azure/README.md): `validate` against the real provider schemas, 15 mocked-provider tests of the security and resilience properties, tflint, trivy and checkov all pass; **nothing was applied**, so Azure's acceptance of the configuration, the Entra token claims, the managed-identity database login and the alert metric names are unproven, each with a named check for the first deploy. Not included on purpose: Front Door and WAF, private endpoints for the registry and vault, an egress firewall, a second region, tracing.
 
 ## 5. What was cut, and why
 
@@ -145,7 +157,7 @@ Cut in this order, to protect the end-to-end flow, test quality and publish reli
 
 - **Scheduled release and embargo.** Real feature, orthogonal to the core path; the delayed-job and window machinery it needs already exists.
 - **Attachments and iXBRL / structured financial data.** Large surface, little extra evidence of architecture. EDGAR exhibits are modelled only as a required flag.
-- **Real authentication (OIDC / SSO) and per-user MFA.** Roles and tenant isolation are enforced; identity is seeded.
+- ~~Real authentication (OIDC / SSO)~~ **now built** (bearer tokens, Entra ID and Keycloak; MFA is the identity provider's policy). Still cut: per-role step-up for publish, SCIM user provisioning, a company-per-user mapping beyond one default or a token claim.
 - **Real newswire integrations.** Interfaces and error taxonomy are in place; vendor behaviour is unknown without access.
 - **Translations / multilingual notices, additional categories** (UK: more DTR items; US: more 8-K items).
 - **Notifications** (email/Slack to approvers), **reporting** and search.
@@ -157,12 +169,18 @@ Verified by running it:
 
 - Draft to published in UK and US through the UI, the REST demo and the tests.
 - Retry with backoff, exhaustion and manual retry, permanent rejection, lost acknowledgement (reconciled), lease takeover after a crash, lost wake-up recovery by the sweeper.
-- Same suite on SQLite (96 tests) and on PostgreSQL + Redis (99 tests, including two workers).
+- Same suite on SQLite (114 tests, 7 skipped) and on PostgreSQL + Redis (121 tests, including two workers), plus 12 UI logic tests. The screens are described in docs/UI.md.
+- Real authentication: tokens verified against a JWKS (valid, expired, wrong audience or issuer, forged, unknown role, provider down), and sign-in with Authorization Code + PKCE through a real browser against Keycloak.
+- The PostgreSQL queue on a real database, with two workers and after the listener connection is cut.
+- The Compose twin (Keycloak, PostgreSQL queue, migrate job, 2 workers) with the demo and a benchmark using real tokens.
 - An independent code review and security review of the final code. Fixed from them: authentication decided on the matched route (an encoded path such as `/%61pi/...` skipped it), persona auth refused when `DEMO=0`, malformed list cursor now 400, approval bound to the reviewed revision, publish race now 409, gateway timeout and crash-after-claim handling, Compose ports on localhost.
 - The `docker compose up --build` stack (migrate, api, worker, web) with the demo run through nginx, and with three workers.
 - Typecheck for server and web.
 
 Not verified, or only designed:
+
+- **Everything on Azure.** The Terraform passes validate, tflint, trivy, checkov and 15 mocked tests; it was never applied. Unproven until the first deploy: Entra app roles in the token, the managed-identity database login, `LISTEN/NOTIFY` through the managed server, the container subnet and NSG, the alert metric names, the deploy workflow, failover and restore times.
+- Performance on Azure (the measurements are a laptop under Azure-sized limits).
 
 - The Anthropic provider against the live API (the request/response shape is tested against a stubbed `fetch`).
 - Load, soak and failure injection at the infrastructure level (Postgres failover, Redis eviction under memory pressure).
@@ -179,4 +197,4 @@ Known, deliberately not fixed (noted by the reviews): `DEMO` defaults to on so t
 4. **Anchoring audit chain heads** to write-once storage (or a signed timestamp) to turn tamper-evident into tamper-resistant.
 5. **OpenTelemetry**: traces across api, queue, worker and the wire; metrics for lease takeovers, retries, time to acknowledgement; alerts on exhausted publications.
 6. **Evaluation gate for the real LLM:** a labelled set of announcements and a threshold on recall for risk flags before the provider is allowed on in production.
-7. **Real identity** (OIDC), per-role step-up for publish, and scheduled / embargoed release.
+7. **First deploy to a `test` subscription** following `infra/azure/README.md`, then record the failover and restore times in SIZING.md; add per-role step-up for publish and scheduled / embargoed release.

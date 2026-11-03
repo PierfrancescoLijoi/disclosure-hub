@@ -33,7 +33,58 @@ export interface ListQuery {
 }
 
 /** List rows carry the current headline so the UI needs no second query per row. */
-export type ListItem = Announcement & { headline: string };
+export type ListItem = Announcement & {
+  headline: string;
+  /** A reviewer asked for changes to the current revision (it came back to the author as a draft). */
+  changesRequested: boolean;
+};
+
+/** What a stranger may read about a published announcement: no people, no approvals, no metadata. */
+export interface PublicItem {
+  id: string;
+  jurisdiction: string;
+  category: string;
+  headline: string;
+  issuerName: string;
+  receipt: string;
+  filingDate: string | null;
+  publishedAt: string;
+}
+export type PublicDetail = PublicItem & { body: string };
+export interface PublicQuery {
+  jurisdiction?: string;
+  q?: string;
+  limit: number;
+  cursor?: string;
+}
+
+/** One row of a company's publication console. */
+export interface PublicationJob {
+  id: string;
+  announcementId: string;
+  jurisdiction: string;
+  headline: string;
+  revision: number;
+  status: PublicationStatus;
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt: string;
+  lastError: string | null;
+  externalRef: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One line of a company's activity stream. */
+export interface ActivityEvent {
+  announcementId: string;
+  headline: string;
+  jurisdiction: string;
+  type: string;
+  actorId: string;
+  at: string;
+  revision: number | null;
+}
 
 export type AnnouncementPatch = Partial<
   Pick<Announcement, 'status' | 'currentRevision' | 'approvalRequirement' | 'failureReason'>
@@ -81,6 +132,9 @@ export interface StoreTx {
     get(issuerId: string, id: string): Promise<Announcement | null>;
     findByIdempotencyKey(issuerId: string, key: string): Promise<Announcement | null>;
     list(issuerId: string, q: ListQuery): Promise<{ items: ListItem[]; nextCursor: string | null }>;
+    /** Published announcements across all companies, newest first. The only query that crosses a company boundary. */
+    publicFeed(q: PublicQuery): Promise<{ items: PublicItem[]; nextCursor: string | null }>;
+    publicGet(id: string): Promise<PublicDetail | null>;
     /** Compare-and-set on version; bumps version. Throws a 409 when the version moved. */
     update(issuerId: string, id: string, expectedVersion: number, patch: AnnouncementPatch, at: string): Promise<void>;
   };
@@ -107,6 +161,8 @@ export interface StoreTx {
     claim(id: string, now: string, leaseMs: number, token: string): Promise<Publication | null>;
     /** Write that only succeeds for the current lease holder; false when the lease was lost. */
     finish(id: string, token: string, patch: PublicationPatch, at: string): Promise<boolean>;
+    /** The company's recent publication jobs, newest activity first. */
+    listByIssuer(issuerId: string, limit: number): Promise<PublicationJob[]>;
     /** Due work with no worker on it for longer than graceMs: the sweeper's safety net. */
     overdue(now: string, graceMs: number, limit: number): Promise<Publication[]>;
   };
@@ -114,6 +170,8 @@ export interface StoreTx {
     /** Appends with per-announcement sequence and hash chain. */
     append(e: AuditInput, at: string): Promise<AuditEvent>;
     list(announcementId: string): Promise<AuditEvent[]>;
+    /** The company's most recent events across all its announcements. */
+    recent(issuerId: string, limit: number): Promise<ActivityEvent[]>;
   };
   aiReports: {
     insert(r: AiReportRecord): Promise<void>;

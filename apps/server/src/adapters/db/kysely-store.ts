@@ -13,7 +13,7 @@ import type {
   Status,
   ValidationReport,
 } from '../../domain/types.js';
-import type { Store, StoreTx } from '../../ports/index.js';
+import type { PublicItem, Store, StoreTx } from '../../ports/index.js';
 import type { DB } from './schema.js';
 
 type Row<T extends keyof DB> = Selectable<DB[T]>;
@@ -97,6 +97,52 @@ const toAudit = (r: Row<'audit_events'>): AuditEvent => ({
   data: json(r.data),
   prevHash: r.prev_hash,
   hash: r.hash,
+});
+
+/** Published announcements with their acknowledged publication: what the public feed may expose, nothing else. */
+const publishedQuery = (db: Kysely<DB>) =>
+  db
+    .selectFrom('announcements')
+    .innerJoin('revisions', (j) =>
+      j.onRef('revisions.announcement_id', '=', 'announcements.id').onRef('revisions.number', '=', 'announcements.current_revision'),
+    )
+    .innerJoin('publications', (j) =>
+      j.onRef('publications.announcement_id', '=', 'announcements.id').onRef('publications.revision', '=', 'announcements.current_revision'),
+    )
+    .innerJoin('issuers', 'issuers.id', 'announcements.issuer_id')
+    .select([
+      'announcements.id',
+      'announcements.jurisdiction',
+      'announcements.category',
+      'revisions.headline',
+      'revisions.body',
+      'issuers.name as issuer_name',
+      'publications.external_ref',
+      'publications.ack',
+      'publications.updated_at as published_at',
+    ])
+    .where('announcements.status', '=', 'published')
+    .where('publications.status', '=', 'acked')
+    .where('publications.external_ref', 'is not', null);
+
+const toPublicItem = (r: {
+  id: string;
+  jurisdiction: string;
+  category: string;
+  headline: string;
+  issuer_name: string;
+  external_ref: string | null;
+  ack: string | null;
+  published_at: string;
+}): PublicItem => ({
+  id: r.id,
+  jurisdiction: r.jurisdiction,
+  category: r.category,
+  headline: r.headline,
+  issuerName: r.issuer_name,
+  receipt: r.external_ref ?? '',
+  filingDate: r.ack ? (json<{ filingDate?: string }>(r.ack).filingDate ?? null) : null,
+  publishedAt: r.published_at,
 });
 
 const publicationColumns = (p: import('../../ports/index.js').PublicationPatch) => ({
@@ -191,6 +237,11 @@ function buildTx(db: Kysely<DB>): StoreTx {
           )
           .selectAll('announcements')
           .select('revisions.headline')
+          .select(
+            sql<number>`(case when exists (select 1 from approvals ap where ap.announcement_id = announcements.id and ap.revision = announcements.current_revision and ap.decision = 'request_changes') then 1 else 0 end)`.as(
+              'changes_requested',
+            ),
+          )
           .where('announcements.issuer_id', '=', issuerId);
         if (q.status) query = query.where('announcements.status', '=', q.status);
         if (q.jurisdiction) query = query.where('announcements.jurisdiction', '=', q.jurisdiction);
@@ -211,10 +262,43 @@ function buildTx(db: Kysely<DB>): StoreTx {
         const page = rows.slice(0, q.limit);
         const last = page.at(-1);
         return {
-          items: page.map((r) => ({ ...toAnnouncement(r), headline: r.headline })),
+          items: page.map((r) => ({ ...toAnnouncement(r), headline: r.headline, changesRequested: Number(r.changes_requested) === 1 })),
           nextCursor:
             rows.length > q.limit && last ? Buffer.from(`${last.created_at}|${last.id}`).toString('base64url') : null,
         };
+      },
+
+      async publicFeed(q) {
+        let query = publishedQuery(db);
+        if (q.jurisdiction) query = query.where('announcements.jurisdiction', '=', q.jurisdiction);
+        if (q.q) {
+          const like = '%' + q.q.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+          query = query.where(
+            sql<boolean>`(lower(revisions.headline) like ${like} escape '\\' or lower(issuers.name) like ${like} escape '\\')`,
+          );
+        }
+        if (q.cursor) {
+          const [at, id] = Buffer.from(q.cursor, 'base64url').toString().split('|') as [string, string];
+          query = query.where((eb) =>
+            eb.or([eb('publications.updated_at', '<', at), eb.and([eb('publications.updated_at', '=', at), eb('announcements.id', '<', id)])]),
+          );
+        }
+        const rows = await query
+          .orderBy('publications.updated_at', 'desc')
+          .orderBy('announcements.id', 'desc')
+          .limit(q.limit + 1)
+          .execute();
+        const page = rows.slice(0, q.limit);
+        const last = page.at(-1);
+        return {
+          items: page.map(toPublicItem),
+          nextCursor: rows.length > q.limit && last ? Buffer.from(`${last.published_at}|${last.id}`).toString('base64url') : null,
+        };
+      },
+
+      async publicGet(id) {
+        const r = await publishedQuery(db).where('announcements.id', '=', id).executeTakeFirst();
+        return r ? { ...toPublicItem(r), body: r.body } : null;
       },
 
       async update(issuerId, id, expectedVersion, patch, at) {
@@ -423,6 +507,36 @@ function buildTx(db: Kysely<DB>): StoreTx {
         return Number(res.numUpdatedRows) === 1;
       },
 
+      async listByIssuer(issuerId, limit) {
+        const rows = await db
+          .selectFrom('publications')
+          .innerJoin('announcements', 'announcements.id', 'publications.announcement_id')
+          .innerJoin('revisions', (j) =>
+            j.onRef('revisions.announcement_id', '=', 'publications.announcement_id').onRef('revisions.number', '=', 'publications.revision'),
+          )
+          .selectAll('publications')
+          .select(['announcements.jurisdiction', 'revisions.headline'])
+          .where('publications.issuer_id', '=', issuerId)
+          .orderBy('publications.updated_at', 'desc')
+          .limit(limit)
+          .execute();
+        return rows.map((r) => ({
+          id: r.id,
+          announcementId: r.announcement_id,
+          jurisdiction: r.jurisdiction,
+          headline: r.headline,
+          revision: r.revision,
+          status: r.status as Publication['status'],
+          attempts: r.attempts,
+          maxAttempts: r.max_attempts,
+          nextAttemptAt: r.next_attempt_at,
+          lastError: r.last_error,
+          externalRef: r.external_ref,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        }));
+      },
+
       async overdue(now, graceMs, limit) {
         const dueBefore = new Date(Date.parse(now) - graceMs).toISOString();
         const rows = await db
@@ -442,6 +556,40 @@ function buildTx(db: Kysely<DB>): StoreTx {
     },
 
     audit: {
+      async recent(issuerId, limit) {
+        const rows = await db
+          .selectFrom('audit_events')
+          .innerJoin('announcements', 'announcements.id', 'audit_events.announcement_id')
+          .innerJoin('revisions', (j) =>
+            j.onRef('revisions.announcement_id', '=', 'announcements.id').onRef('revisions.number', '=', 'announcements.current_revision'),
+          )
+          .select([
+            'audit_events.announcement_id',
+            'audit_events.type',
+            'audit_events.actor_id',
+            'audit_events.at',
+            'audit_events.data',
+            'announcements.jurisdiction',
+            'revisions.headline',
+          ])
+          .where('audit_events.issuer_id', '=', issuerId)
+          .orderBy('audit_events.at', 'desc')
+          .orderBy('audit_events.seq', 'desc')
+          .limit(limit)
+          .execute();
+        return rows.map((r) => {
+          const data = json<Record<string, unknown>>(r.data);
+          return {
+            announcementId: r.announcement_id,
+            headline: r.headline,
+            jurisdiction: r.jurisdiction,
+            type: r.type,
+            actorId: r.actor_id,
+            at: r.at,
+            revision: typeof data.revision === 'number' ? data.revision : null,
+          };
+        });
+      },
       async append(e, at) {
         const last = await db
           .selectFrom('audit_events')

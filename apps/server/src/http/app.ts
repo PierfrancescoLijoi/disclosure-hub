@@ -42,6 +42,13 @@ const chaosBody = z.object({
   latencyMs: z.number().int().min(0).max(10_000).optional(),
 });
 const idParam = z.object({ id: z.string().min(1) });
+const publicQuery = z.object({
+  jurisdiction: z.string().max(10).optional(),
+  q: z.string().trim().max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: listQuery.shape.cursor,
+});
+const recentQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) });
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -87,8 +94,8 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
   app.addHook('preHandler', async (req) => {
     const route = req.routeOptions.url ?? '';
     if (!route.startsWith('/api/')) return;
-    // The sign-in configuration needs no identity.
-    if (route === '/api/config' || (route === '/api/users' && personaMode)) return;
+    // Public reading of published announcements and the sign-in configuration need no identity.
+    if (route === '/api/config' || route.startsWith('/api/public/') || (route === '/api/users' && personaMode)) return;
 
     if (authenticate) {
       const header = req.headers.authorization;
@@ -171,6 +178,13 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
     return { users: users.map((u) => ({ id: u.id, name: u.name, issuerId: u.issuerId, roles: u.roles })) };
   });
 
+  // Public: published announcements only, no people, no approvals, no jurisdiction metadata.
+  app.get('/api/public/announcements', async (req) => rt.announcements.publicFeed(publicQuery.parse(req.query)));
+  app.get('/api/public/announcements/:id', async (req) => rt.announcements.publicGet(idParam.parse(req.params).id));
+
+  app.get('/api/activity', async (req) => ({ events: await rt.announcements.activity(req.actor, recentQuery.parse(req.query).limit) }));
+  app.get('/api/publications', async (req) => ({ items: await rt.announcements.publications(req.actor, recentQuery.parse(req.query).limit) }));
+
   app.get('/api/me', async (req) => ({ actor: req.actor, issuer: await rt.store.read.issuers.get(req.actor.issuerId) }));
 
   // ------------------------------------------------------------ announcements
@@ -241,6 +255,8 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
     await rt.announcements.withdraw(req.actor, id, commentBody.parse(req.body ?? {}).comment);
     return rt.announcements.get(req.actor, id);
   });
+
+  app.get('/api/announcements/:id/preview', async (req) => rt.announcements.preview(req.actor, idParam.parse(req.params).id));
 
   app.get('/api/announcements/:id/audit', async (req) => rt.announcements.auditTrail(req.actor, idParam.parse(req.params).id));
 

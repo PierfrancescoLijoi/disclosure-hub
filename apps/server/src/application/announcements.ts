@@ -23,7 +23,7 @@ import type {
   Status,
   ValidationReport,
 } from '../domain/types.js';
-import type { Clock, JobQueue, ListQuery, Logger, Store, StoreTx } from '../ports/index.js';
+import type { Clock, JobQueue, ListQuery, Logger, PublicQuery, Store, StoreTx } from '../ports/index.js';
 
 export interface ServiceDeps {
   store: Store;
@@ -422,6 +422,48 @@ export class AnnouncementService {
 
   async list(actor: Actor, q: ListQuery) {
     return this.d.store.read.announcements.list(actor.issuerId, q);
+  }
+
+  /** The announcement as the channel will receive it, so an author can check it before submitting. */
+  async preview(actor: Actor, id: string) {
+    const { a, rev, issuer, policy } = await this.load(this.d.store.read, actor, id);
+    const ctx = ruleContext(policy, a, rev, issuer, this.d.clock.now());
+    return {
+      channel: policy.channel,
+      payload: ctx ? policy.render(ctx) : null,
+      problem: ctx ? null : 'The jurisdiction details do not match the category yet, so the filing cannot be rendered.',
+    };
+  }
+
+  /** Recent activity of the caller's company. */
+  async activity(actor: Actor, limit: number) {
+    return this.d.store.read.audit.recent(actor.issuerId, limit);
+  }
+
+  /** The caller's company's publication jobs. */
+  async publications(actor: Actor, limit: number) {
+    return this.d.store.read.publications.listByIssuer(actor.issuerId, limit);
+  }
+
+  /** Public reading of published announcements. Adds the channel and category labels the store does not know. */
+  async publicFeed(q: PublicQuery) {
+    const { items, nextCursor } = await this.d.store.read.announcements.publicFeed(q);
+    return { items: items.map((i) => this.publicLabels(i)), nextCursor };
+  }
+
+  async publicGet(id: string) {
+    const item = await this.d.store.read.announcements.publicGet(id);
+    if (!item) throw notFound('Announcement');
+    return this.publicLabels(item);
+  }
+
+  private publicLabels<T extends { jurisdiction: string; category: string }>(item: T) {
+    const info = this.d.policies.get(item.jurisdiction).describe();
+    return {
+      ...item,
+      channelName: info.channel.name,
+      categoryLabel: info.categories.find((c) => c.key === item.category)?.label ?? item.category,
+    };
   }
 
   async revisions(actor: Actor, id: string): Promise<Revision[]> {
