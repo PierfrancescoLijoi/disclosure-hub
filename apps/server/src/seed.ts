@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+import { z } from 'zod';
 import type { DB } from './adapters/db/schema.js';
 import { makeLei } from './jurisdictions/identifiers.js';
 
@@ -42,4 +43,21 @@ export async function seedDemo(db: Kysely<DB>): Promise<void> {
       .onConflict((oc) => oc.column('id').doNothing())
       .execute();
   }
+}
+
+const SeedIssuers = z.array(
+  z.object({ id: z.string().min(1), name: z.string().min(1), profiles: z.record(z.string(), z.record(z.string(), z.string())) }),
+);
+
+/** Creates or updates the companies a deployment serves, from SEED_ISSUERS_JSON. Idempotent. */
+export async function seedIssuers(db: Kysely<DB>, json: string): Promise<number> {
+  const issuers = SeedIssuers.parse(JSON.parse(json));
+  for (const i of issuers) {
+    await db
+      .insertInto('issuers')
+      .values({ id: i.id, name: i.name, profiles: JSON.stringify(i.profiles) })
+      .onConflict((oc) => oc.column('id').doUpdateSet({ name: i.name, profiles: JSON.stringify(i.profiles) }))
+      .execute();
+  }
+  return issuers.length;
 }

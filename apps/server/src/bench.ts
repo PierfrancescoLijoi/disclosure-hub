@@ -6,21 +6,12 @@
  * announcement is published by the workers). The mock newswire answers instantly unless
  * GATEWAY_LATENCY_MS is set, so by default this measures the platform, not a vendor.
  */
-const BASE = process.env.BASE_URL ?? 'http://localhost:3000';
+import { call } from './cli-auth.js';
+
 const N = Number(process.env.N ?? 300);
 const CONCURRENCY = Number(process.env.CONCURRENCY ?? 20);
 const LATENCY = Number(process.env.GATEWAY_LATENCY_MS ?? 0);
 
-async function call(as: string, method: string, path: string, body?: unknown) {
-  const res = await fetch(`${BASE}/api${path}`, {
-    method,
-    headers: { 'content-type': 'application/json', 'x-user-id': as },
-    body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
-  });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(`${method} ${path} as ${as}: ${res.status} ${data?.error?.code}`);
-  return data;
-}
 
 const pct = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * p))]!;
 

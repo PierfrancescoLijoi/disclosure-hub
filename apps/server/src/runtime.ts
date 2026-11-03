@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 import { BullMqQueue } from './adapters/queue/bullmq.js';
 import { InProcessQueue } from './adapters/queue/in-process.js';
+import { PgNotifyQueue } from './adapters/queue/pg-notify.js';
 import { connect, migrateToLatest, type Connection } from './adapters/db/connect.js';
 import { createStore } from './adapters/db/kysely-store.js';
 import type { DB } from './adapters/db/schema.js';
@@ -13,7 +14,7 @@ import type { Config } from './config.js';
 import type { PolicyRegistry } from './domain/policy.js';
 import { defaultPolicies } from './jurisdictions/index.js';
 import { GatewayRegistry, type Clock, type JobQueue, type Logger, type Store } from './ports/index.js';
-import { seedDemo } from './seed.js';
+import { seedDemo, seedIssuers } from './seed.js';
 
 export interface Runtime {
   config: Config;
@@ -55,11 +56,12 @@ export const consoleLogger: Logger = { info: write('info'), warn: write('warn'),
 export async function createRuntime(config: Config, o: RuntimeOverrides = {}): Promise<Runtime> {
   const log = o.log ?? consoleLogger;
   const clock = o.clock ?? systemClock;
-  const connection = o.connection ?? connect(config.DATABASE_URL);
+  const connection = o.connection ?? connect(config.DATABASE_URL, config.DATABASE_AUTH);
   const { db } = connection;
   if (config.AUTO_MIGRATE && config.ROLE !== 'worker') {
     await migrateToLatest(db);
     if (config.DEMO) await seedDemo(db);
+    if (config.SEED_ISSUERS_JSON) await seedIssuers(db, config.SEED_ISSUERS_JSON);
   }
 
   const store = createStore(db);
@@ -69,10 +71,15 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
     o.queue ??
     (config.QUEUE_URL === 'inproc'
       ? new InProcessQueue(config.WORKER_CONCURRENCY, (err, id) => log.error({ err, publicationId: id }, 'job crashed'))
-      : new BullMqQueue(config.QUEUE_URL, {
-          concurrency: config.WORKER_CONCURRENCY,
-          onError: (err, id) => log.error({ err, publicationId: id }, 'job crashed'),
-        }));
+      : config.QUEUE_URL === 'pg'
+        ? new PgNotifyQueue(connection.pool!, {
+            concurrency: config.WORKER_CONCURRENCY,
+            onError: (err, id) => log.error({ err, publicationId: id }, 'queue error'),
+          })
+        : new BullMqQueue(config.QUEUE_URL, {
+            concurrency: config.WORKER_CONCURRENCY,
+            onError: (err, id) => log.error({ err, publicationId: id }, 'job crashed'),
+          }));
 
   const runner = new PublicationRunner({
     store,

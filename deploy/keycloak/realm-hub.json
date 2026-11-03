@@ -1,0 +1,193 @@
+{
+  "realm": "hub",
+  "enabled": true,
+  "displayName": "Disclosure Hub (local)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      {
+        "name": "author"
+      },
+      {
+        "name": "company_secretary"
+      },
+      {
+        "name": "legal"
+      },
+      {
+        "name": "cfo"
+      },
+      {
+        "name": "publisher"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "hub-web",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "basic",
+        "web-origins",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "audience-hub-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "hub-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ],
+      "name": "Disclosure Hub web app",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8080/*",
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
+    },
+    {
+      "clientId": "hub-cli",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "basic",
+        "web-origins",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "audience-hub-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "hub-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ],
+      "name": "Command-line scripts (local only)",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Morgan",
+      "email": "alice@northwind.example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "hub-dev-only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "author"
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Chen",
+      "email": "bob@northwind.example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "hub-dev-only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "company_secretary"
+      ]
+    },
+    {
+      "username": "carol",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Diaz",
+      "email": "carol@northwind.example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "hub-dev-only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "legal"
+      ]
+    },
+    {
+      "username": "dan",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Dan",
+      "lastName": "Okafor",
+      "email": "dan@northwind.example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "hub-dev-only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "cfo"
+      ]
+    },
+    {
+      "username": "erin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Erin",
+      "lastName": "Walsh",
+      "email": "erin@northwind.example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "hub-dev-only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "publisher"
+      ]
+    }
+  ]
+}

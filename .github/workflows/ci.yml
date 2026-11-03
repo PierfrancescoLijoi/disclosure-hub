@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: hub, POSTGRES_PASSWORD: hub-dev-only, POSTGRES_DB: hub_test }
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hub" --health-interval 3s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["56379:6379"]
+    env:
+      TEST_PG_URL: postgres://hub:hub-dev-only@localhost:55432/hub_test
+      TEST_REDIS_URL: redis://localhost:56379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run --no-file-parallelism
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline infrastructure checks (format, validate, mocked tests, tflint, trivy, checkov)
+        run: bash infra/azure/scripts/verify.sh

@@ -16,9 +16,27 @@ export const ConfigSchema = z
     PORT: int(3000),
     /** `sqlite:./data/hub.db`, `sqlite::memory:` or `postgres://...` */
     DATABASE_URL: z.string().default('sqlite:./data/hub.db'),
-    /** `inproc` or `redis://...` */
+    /** `inproc`, `pg` (LISTEN/NOTIFY on the database, no extra service) or `redis://...` */
     QUEUE_URL: z.string().default('inproc'),
     AUTO_MIGRATE: flag(true),
+    /** `demo`: seeded personas via the x-user-id header (needs DEMO=1). `oidc`: verify bearer tokens from a real identity provider. */
+    AUTH_MODE: z.enum(['demo', 'oidc']).default('demo'),
+    OIDC_ISSUER: z.string().url().optional(),
+    OIDC_AUDIENCE: z.string().min(1).optional(),
+    /** Only when the signing keys are reachable at another address than the issuer's metadata says. */
+    OIDC_JWKS_URI: z.string().url().optional(),
+    OIDC_ROLES_CLAIM: z.string().default('roles'),
+    OIDC_ISSUER_CLAIM: z.string().default('issuer_id'),
+    /** The company every user acts for when the token carries no company claim (one-company deployments). */
+    OIDC_DEFAULT_ISSUER: z.string().min(1).optional(),
+    /** What the browser app needs to start the sign-in (public values). */
+    OIDC_AUTHORITY: z.string().url().optional(),
+    OIDC_SPA_CLIENT_ID: z.string().min(1).optional(),
+    OIDC_SPA_SCOPE: z.string().default('openid profile'),
+    /** `password`: credentials in DATABASE_URL. `azure-managed-identity`: an Entra token is the password. */
+    DATABASE_AUTH: z.enum(['password', 'azure-managed-identity']).default('password'),
+    /** JSON array of companies to create or update at migration time: [{ id, name, profiles }]. */
+    SEED_ISSUERS_JSON: z.string().optional(),
     /** Seeded personas, dev endpoints for the mock gateways, persona picker in the UI. */
     DEMO: flag(true),
     /** Hold releases while the channel is closed instead of sending at any hour. */
@@ -40,8 +58,20 @@ export const ConfigSchema = z
     WEB_DIST: z.string().optional(),
   })
   .superRefine((c, ctx) => {
+    const postgres = /^postgres(ql)?:\/\//.test(c.DATABASE_URL);
+    if (c.QUEUE_URL === 'pg' && !postgres) {
+      ctx.addIssue({ code: 'custom', path: ['QUEUE_URL'], message: 'QUEUE_URL=pg needs a PostgreSQL DATABASE_URL' });
+    }
+    if (c.DATABASE_AUTH === 'azure-managed-identity' && !postgres) {
+      ctx.addIssue({ code: 'custom', path: ['DATABASE_AUTH'], message: 'azure-managed-identity needs a PostgreSQL DATABASE_URL' });
+    }
+    if (c.AUTH_MODE === 'oidc') {
+      for (const key of ['OIDC_ISSUER', 'OIDC_AUDIENCE'] as const) {
+        if (!c[key]) ctx.addIssue({ code: 'custom', path: [key], message: `AUTH_MODE=oidc needs ${key}` });
+      }
+    }
     if (c.QUEUE_URL === 'inproc' && c.ROLE !== 'all') {
-      ctx.addIssue({ code: 'custom', path: ['QUEUE_URL'], message: 'The in-process queue only works with ROLE=all; use redis:// for split roles' });
+      ctx.addIssue({ code: 'custom', path: ['QUEUE_URL'], message: 'The in-process queue only works with ROLE=all; use pg or redis:// for split roles' });
     }
     if (c.AI_PROVIDER === 'anthropic' && !c.ANTHROPIC_API_KEY) {
       ctx.addIssue({ code: 'custom', path: ['ANTHROPIC_API_KEY'], message: 'AI_PROVIDER=anthropic needs ANTHROPIC_API_KEY' });

@@ -118,6 +118,17 @@ function buildTx(db: Kysely<DB>): StoreTx {
       async list() {
         return (await db.selectFrom('users').selectAll().orderBy('name').execute()).map(toActor);
       },
+      async listByIssuer(issuerId) {
+        return (await db.selectFrom('users').selectAll().where('issuer_id', '=', issuerId).orderBy('name').execute()).map(toActor);
+      },
+      async upsert(actor) {
+        const row = { id: actor.id, issuer_id: actor.issuerId, name: actor.name, roles: JSON.stringify(actor.roles) };
+        await db
+          .insertInto('users')
+          .values(row)
+          .onConflict((oc) => oc.column('id').doUpdateSet({ issuer_id: row.issuer_id, name: row.name, roles: row.roles }))
+          .execute();
+      },
     },
 
     issuers: {

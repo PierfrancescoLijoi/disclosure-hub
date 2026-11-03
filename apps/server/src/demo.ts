@@ -4,18 +4,9 @@
  *   npm run demo                      (server on http://localhost:3000)
  *   BASE_URL=http://host:3000 npm run demo
  */
-const BASE = process.env.BASE_URL ?? 'http://localhost:3000';
+import { call } from './cli-auth.js';
 
-async function call(as: string, method: string, path: string, body?: unknown) {
-  const res = await fetch(`${BASE}/api${path}`, {
-    method,
-    headers: { 'content-type': 'application/json', 'x-user-id': as },
-    body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
-  });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(`${method} ${path} as ${as}: ${res.status} ${data?.error?.code} ${data?.error?.message}`);
-  return data;
-}
+
 
 const day = (back: number) => new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
 const CONTACT = 'Enquiries: Investor Relations, ir@northwind.example.';

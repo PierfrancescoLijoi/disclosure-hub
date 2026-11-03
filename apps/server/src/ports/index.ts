@@ -67,7 +67,14 @@ export interface AiReportRecord {
 
 /** Every method that touches tenant data takes issuerId and filters on it in the query. */
 export interface StoreTx {
-  users: { get(id: string): Promise<Actor | null>; list(): Promise<Actor[]> };
+  users: {
+    get(id: string): Promise<Actor | null>;
+    list(): Promise<Actor[]>;
+    /** Names for one company's screens; never crosses a company boundary. */
+    listByIssuer(issuerId: string): Promise<Actor[]>;
+    /** Remembers who signed in (the identity provider stays the source of truth for roles). */
+    upsert(actor: Actor): Promise<void>;
+  };
   issuers: { get(id: string): Promise<Issuer | null>; list(): Promise<Issuer[]> };
   announcements: {
     insert(a: Announcement, idempotencyKey: string | null): Promise<void>;

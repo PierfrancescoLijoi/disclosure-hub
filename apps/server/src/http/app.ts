@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z, ZodError } from 'zod';
 import { chaosKey, type Chaos } from '../adapters/gateways/mock.js';
+import { createAuthenticator } from '../auth/oidc.js';
 import { DomainError, unauthorized } from '../domain/errors.js';
 import { STATUSES, type Actor } from '../domain/types.js';
 import type { Runtime } from '../runtime.js';
@@ -62,15 +63,49 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Unexpected error' } });
   });
 
-  // Demo identity: the user id header selects a seeded persona. Real deployments swap this
-  // hook for OIDC; everything below only ever sees an Actor.
+  // Identity. AUTH_MODE=oidc verifies a bearer token from a real identity provider (Entra ID,
+  // Keycloak, ...). AUTH_MODE=demo lets the x-user-id header pick a seeded persona and only works
+  // with DEMO=1. Everything below this hook only ever sees an Actor.
+  const oidcMode = rt.config.AUTH_MODE === 'oidc';
+  const personaMode = !oidcMode && rt.config.DEMO;
+  const authenticate = oidcMode
+    ? createAuthenticator(
+        {
+          issuer: rt.config.OIDC_ISSUER!,
+          audience: rt.config.OIDC_AUDIENCE!,
+          jwksUri: rt.config.OIDC_JWKS_URI,
+          rolesClaim: rt.config.OIDC_ROLES_CLAIM,
+          issuerClaim: rt.config.OIDC_ISSUER_CLAIM,
+          defaultIssuer: rt.config.OIDC_DEFAULT_ISSUER,
+        },
+        async (id) => (await rt.store.read.issuers.get(id)) !== null,
+      )
+    : undefined;
+  const seenIdentity = new Map<string, string>(); // actor id -> fingerprint last written to the users table
+
   // Decided on the matched route, not the raw URL: '/%61pi/...' reaches the same handler.
-  const PUBLIC = new Set(['/api/config', '/api/users']);
   app.addHook('preHandler', async (req) => {
     const route = req.routeOptions.url ?? '';
-    if (!route.startsWith('/api/') || PUBLIC.has(route)) return;
-    // Persona headers are a demo mechanism; without DEMO nothing authenticates until OIDC replaces this hook.
-    if (!rt.config.DEMO) throw unauthorized('No identity provider configured');
+    if (!route.startsWith('/api/')) return;
+    // The sign-in configuration needs no identity.
+    if (route === '/api/config' || (route === '/api/users' && personaMode)) return;
+
+    if (authenticate) {
+      const header = req.headers.authorization;
+      const token = header?.match(/^Bearer\s+(\S+)$/i)?.[1];
+      if (!token) throw unauthorized('Missing bearer token');
+      const actor = await authenticate(token);
+      const fingerprint = JSON.stringify([actor.name, actor.issuerId, actor.roles]);
+      if (seenIdentity.get(actor.id) !== fingerprint) {
+        await rt.store.read.users.upsert(actor);
+        seenIdentity.set(actor.id, fingerprint);
+      }
+      req.actor = actor;
+      return;
+    }
+
+    // Persona headers are a demo mechanism; without DEMO nothing authenticates here.
+    if (!personaMode) throw unauthorized('No identity provider configured');
     const id = req.headers['x-user-id'];
     const actor = typeof id === 'string' ? await rt.store.read.users.get(id) : null;
     if (!actor) throw unauthorized();
@@ -114,16 +149,26 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
   app.get('/api/config', async () => ({
     role: rt.config.ROLE,
     demo: rt.config.DEMO,
-    queue: rt.config.QUEUE_URL === 'inproc' ? 'in-process' : 'redis',
+    queue: rt.config.QUEUE_URL === 'inproc' ? 'in-process' : rt.config.QUEUE_URL === 'pg' ? 'postgres' : 'redis',
+    auth: oidcMode
+      ? {
+          mode: 'oidc' as const,
+          authority: rt.config.OIDC_AUTHORITY ?? rt.config.OIDC_ISSUER,
+          clientId: rt.config.OIDC_SPA_CLIENT_ID ?? null,
+          scope: rt.config.OIDC_SPA_SCOPE,
+        }
+      : { mode: 'demo' as const },
     database: rt.config.DATABASE_URL.startsWith('postgres') ? 'postgres' : 'sqlite',
     enforceWindows: rt.config.ENFORCE_WINDOWS,
     ai: rt.preCheck ? { provider: rt.preCheck.providerName } : null,
     jurisdictions: rt.policies.list().map((p) => p.describe()),
   }));
 
-  app.get('/api/users', async () => {
-    if (!rt.config.DEMO) throw unauthorized('Persona list is only available in demo mode');
-    return { users: await rt.store.read.users.list() };
+  // Demo: every persona, for the picker. OIDC: only people of the caller's own company, for names on screen.
+  app.get('/api/users', async (req) => {
+    if (personaMode) return { users: await rt.store.read.users.list() };
+    const users = await rt.store.read.users.listByIssuer(req.actor.issuerId);
+    return { users: users.map((u) => ({ id: u.id, name: u.name, issuerId: u.issuerId, roles: u.roles })) };
   });
 
   app.get('/api/me', async (req) => ({ actor: req.actor, issuer: await rt.store.read.issuers.get(req.actor.issuerId) }));

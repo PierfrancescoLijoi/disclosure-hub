@@ -1,15 +1,37 @@
-# Containerized mode: PostgreSQL + Redis/BullMQ, separate api and worker processes, nginx frontend.
-# Same business logic, API and state machine as local mode; only the infrastructure adapters change.
-#   docker compose up --build            then open http://localhost:8080
-#   docker compose up --build --scale worker=3     more workers, nothing else changes
+# Local twin of the Azure deployment (infra/azure). Same components, same configuration names:
+#
+#   here                        Azure
+#   postgres                    PostgreSQL Flexible Server (zone-redundant HA)
+#   keycloak (OIDC)             Microsoft Entra ID (OIDC)
+#   api, worker (+ migrate)     Container Apps: api, worker, migrate job
+#   web (nginx)                 the API container serves the web app; Azure ingress terminates TLS
+#   password in env (dev only)  managed identity token as the database password, Key Vault for the rest
+#
+# One environment variable set (AUTH_MODE=oidc, QUEUE_URL=pg, ...) selects the adapters; the business
+# logic, API, rules and state machine are identical. Resource limits match the small-company
+# profile in docs/SIZING.md, so what you measure here is what the sizing document promises.
+#
+#   docker compose up --build            then open http://localhost:8080  (sign in: alice, bob, carol, dan, erin)
+#   docker compose up --build --scale worker=2     the Azure default: two workers
 
 x-server-env: &server-env
   DATABASE_URL: postgres://hub:hub-dev-only@postgres:5432/hub
-  QUEUE_URL: redis://redis:6379
-  AUTO_MIGRATE: "0"          # the migrate job owns the schema
-  DEMO: ${DEMO:-1}          # seeded personas, mock-wire controls; persona auth is demo-only
+  QUEUE_URL: pg               # LISTEN/NOTIFY on the database: no Redis to run, patch or pay for
+  AUTO_MIGRATE: "0"           # the migrate job owns the schema
+  PG_POOL_MAX: ${PG_POOL_MAX:-5}   # per process: (api + workers) x this must stay under Postgres max_connections
+  DEMO: ${DEMO:-1}            # mock-newswire controls and demo data; the sign-in below is real either way
+  # Identity: a real OIDC provider (local Keycloak, realm in deploy/keycloak). The issuer must match what
+  # the browser sees; the signing keys are fetched over the compose network.
+  AUTH_MODE: oidc
+  OIDC_ISSUER: http://localhost:8081/realms/hub
+  OIDC_JWKS_URI: http://keycloak:8080/realms/hub/protocol/openid-connect/certs
+  OIDC_AUDIENCE: hub-api
+  OIDC_AUTHORITY: http://localhost:8081/realms/hub
+  OIDC_SPA_CLIENT_ID: hub-web
+  OIDC_SPA_SCOPE: openid profile
+  OIDC_ROLES_CLAIM: realm_access.roles
+  OIDC_DEFAULT_ISSUER: northwind
   RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-600}   # per actor; 0 turns it off (load tests)
-  PG_POOL_MAX: ${PG_POOL_MAX:-10}                  # per process: size it against Postgres max_connections
   AI_PROVIDER: ${AI_PROVIDER:-mock}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}
@@ -19,7 +41,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: hub
-      POSTGRES_PASSWORD: hub-dev-only   # local demo only
+      POSTGRES_PASSWORD: hub-dev-only   # local demo only; Azure uses Entra tokens, no password
       POSTGRES_DB: hub
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
@@ -27,14 +49,37 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1g }
 
-  redis:
-    image: redis:7-alpine
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.8
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: hub-dev-only   # local admin console only
+      KC_HOSTNAME: http://localhost:8081
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./deploy/keycloak/realm-hub.json:/opt/keycloak/data/import/realm-hub.json:ro
+    ports: ["127.0.0.1:8081:8080"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1g }
 
   migrate:
     build: .
@@ -48,15 +93,17 @@ services:
     environment:
       <<: *server-env
       ROLE: api
-    ports: ["127.0.0.1:3000:3000"]   # demo auth: keep it off the LAN
+    ports: ["127.0.0.1:3000:3000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 20
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512m }
 
   worker:
     build: .
@@ -65,7 +112,9 @@ services:
       ROLE: worker
     depends_on:
       migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512m }
 
   web:
     build:
@@ -74,6 +123,10 @@ services:
     ports: ["127.0.0.1:8080:80"]
     depends_on:
       api: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128m }
 
 volumes:
   pgdata:
