@@ -1,0 +1,81 @@
+# Spec: Disclosure Hub
+
+## Problem
+Listed issuers must release regulated information to the market under jurisdiction-specific rules (UK MAR Art. 17 via a Regulatory Information Service such as RNS; US Form 8-K / Reg FD via EDGAR). Today this runs through email, spreadsheets and phone calls to a newswire: no enforced review, no proof of who approved what, and a duplicate or missed release is a regulatory incident.
+
+## Goals (measurable)
+- G1: one workflow takes an announcement from draft to published acknowledgement in UK and US; adding a jurisdiction touches zero workflow code (proved by a test).
+- G2: publication is exactly-once in effect: no duplicate and no lost release across retries, worker crashes and gateway timeouts (proved by tests).
+- G3: every state change is recorded in a tamper-evident audit trail, and approvals are bound to the exact content approved.
+- G4: same business logic, API and state transitions in both run modes; only infrastructure adapters differ.
+
+## Out of scope
+Real newswire/EDGAR integration, real SSO, scheduled/embargoed release, attachments and Inline XBRL, translations, billing, HA infrastructure, mobile.
+
+## Actors
+Author (IR team), Approver (company secretary, general counsel, CFO), Publisher (head of IR), Issuer admin (out of scope), Regulator/newswire (external), Auditor (reads audit trail). Sponsor/payer: issuer's IR or legal function.
+
+## Epics and stories
+- EP-1 Drafting and revisions
+  - US-1.1 As an author I create a draft for a jurisdiction and category. Given an issuer with a UK profile, when I create a `results` draft, then it is `draft` revision 1.
+  - US-1.2 As an author I edit a draft. Given a draft, when I save, then a new immutable revision is stored and any earlier validation or approvals are void.
+- EP-2 Jurisdiction validation
+  - US-2.1 As an author I validate a draft and see errors and warnings with codes and field paths. Given an invalid 8-K (item 2.02 without exhibit), when I validate, then status stays `draft` with `US_8K_2_02_EXHIBIT`.
+  - US-2.2 Given a valid draft, when I validate, then status is `validated` and the report is stored against the revision.
+- EP-3 Review and approval (maker-checker)
+  - US-3.1 As an author I submit a validated draft for review; the policy decides how many and which approvals are needed.
+  - US-3.2 As an approver I approve or request changes. Given I authored the revision, then approve is refused (four-eyes).
+  - US-3.3 When the requirement is met the announcement becomes `approved`; request changes returns it to `draft`.
+- EP-4 Publication
+  - US-4.1 As a publisher I publish an approved announcement; the content hash is re-checked against the approved hash.
+  - US-4.2 Given a transient gateway failure, then the system retries with backoff and jitter without duplicating the release.
+  - US-4.3 Given a permanent rejection (e.g. EDGAR suspense), then the announcement is `failed` with the reason, and can be reopened as a new revision.
+  - US-4.4 Given a crash after the gateway accepted but before the ack was stored, then retry reconciles by idempotency key and stores one ack.
+  - US-4.5 On success the ack (RNS number or EDGAR accession, filing date) is stored and the status is `published`.
+- EP-5 Audit
+  - US-5.1 As an auditor I list every event for an announcement and verify the hash chain.
+- EP-6 AI pre-check (advisory)
+  - US-6.1 As a reviewer I request a pre-check that classifies the announcement, lists missing information and flags possible UK MAR / Reg FD risks, each with evidence and explanation. It never changes status.
+- EP-7 Operability
+  - US-7.1 `npm install && npm start` runs everything locally; `docker compose up --build` runs Postgres, Redis, api, worker, web.
+
+## Functional requirements (EARS)
+- FR-1 The system shall allow only the transitions in the state table; any other request shall return 409.
+- FR-2 When a revision is saved, the system shall store it immutably with a SHA-256 content hash.
+- FR-3 When validating, the system shall apply shared rules, then the jurisdiction policy rules, and persist the report.
+- FR-4 When submitting for review, the system shall re-run validation and snapshot the approval requirement from the policy.
+- FR-5 The system shall refuse an approval from the revision author, from a duplicate approver, or from a user lacking an approver role.
+- FR-6 When publishing, the system shall verify the approved hash equals the revision hash before calling any gateway.
+- FR-7 The system shall derive the gateway idempotency key from announcement and revision, and shall look it up at the gateway before any resubmit.
+- FR-8 If a gateway call fails transiently, then the system shall retry up to N times with exponential backoff and jitter, then mark `failed`.
+- FR-9 The system shall append an audit event for every state change, publication attempt and AI report, chained by hash per announcement.
+- FR-10 Every query shall filter by issuer (tenant).
+- FR-11 The AI pre-check shall never be a precondition for any transition.
+
+## Business rules
+- BR-1 (UK) Inside information is disclosed as soon as possible; a delayed disclosure needs a recorded justification (modelled from MAR Art. 17(4)).
+- BR-2 (UK) PDMR dealing notifications are announced within 3 business days of the notification (MAR Art. 19).
+- BR-3 (UK) Inside-information announcements need two approvals including the company secretary; others need one.
+- BR-4 (US) Form 8-K is due 4 business days after the triggering event; late is a warning, not a block.
+- BR-5 (US) Item 2.02 needs Exhibit 99.1 and is furnished, not filed; Item 7.01 (Reg FD) carries intentional vs unintentional selective disclosure; unintentional needs prompt disclosure (later of 24 hours or next NYSE open).
+- BR-6 (US) 8-K needs two approvals including legal.
+- BR-7 Filings accepted after 17:30 ET carry the next business day as filing date.
+- BR-8 Approvals are void when the content changes.
+
+## Non-functional requirements (scale / target / meter)
+- NFR-1 Tenants: 5,000 issuers; 50k announcements/year steady; burst 500 publications in 30 minutes (earnings clusters). Meter: load script against the compose stack.
+- NFR-2 API p95 < 200 ms for reads and transitions, excluding gateway. Meter: request histogram.
+- NFR-3 Enqueue-to-ack p95 < 5 s excluding gateway latency. Meter: publication timestamps.
+- NFR-4 Durability: an acknowledged approval or ack is never lost (commit before enqueue; DB is source of truth). RPO 0 on the DB.
+- NFR-5 Exactly-once in effect per (announcement, revision): 0 duplicates in the crash/retry test matrix.
+- NFR-6 Audit retained at least 5 years (MAR Art. 17(1) website retention; filing records); tamper evidence verified by chain walk.
+- NFR-7 Gateway protection: concurrency cap per gateway, so a burst cannot exceed vendor limits.
+- NFR-8 Code boundary: `domain` imports nothing from adapters/http (checked by test).
+
+## Integrations
+| System | Owner | Contract | Here |
+|---|---|---|---|
+| RNS / FCA-approved RIS | LSEG / vendor | API or SFTP (assumed) | Mock gateway, RNS number ack |
+| EDGAR | SEC | EDGAR Next API (assumed) | Mock gateway, accession + acceptance/suspense |
+| LLM provider | Anthropic (optional) | HTTPS JSON | Port + mock default |
+| IdP | Customer | OIDC | Out of scope |

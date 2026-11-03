@@ -1,0 +1,21 @@
+{
+  "name": "disclosure-hub",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Regulatory announcement platform: draft to published in multiple jurisdictions (UK RNS, US EDGAR)",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "start": "npm run build -w apps/web && npm run start -w apps/server",
+    "dev": "npm run dev -w apps/server",
+    "build": "npm run build -w apps/web && npm run build -w apps/server",
+    "test": "npm test -w apps/server",
+    "typecheck": "npm run typecheck -w apps/server && npm run typecheck -w apps/web",
+    "demo": "npm run demo -w apps/server",
+    "bench": "npm run bench -w apps/server"
+  }
+}

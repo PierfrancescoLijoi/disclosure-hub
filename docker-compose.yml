@@ -1,0 +1,79 @@
+# Containerized mode: PostgreSQL + Redis/BullMQ, separate api and worker processes, nginx frontend.
+# Same business logic, API and state machine as local mode; only the infrastructure adapters change.
+#   docker compose up --build            then open http://localhost:8080
+#   docker compose up --build --scale worker=3     more workers, nothing else changes
+
+x-server-env: &server-env
+  DATABASE_URL: postgres://hub:hub-dev-only@postgres:5432/hub
+  QUEUE_URL: redis://redis:6379
+  AUTO_MIGRATE: "0"          # the migrate job owns the schema
+  DEMO: ${DEMO:-1}          # seeded personas, mock-wire controls; persona auth is demo-only
+  RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-600}   # per actor; 0 turns it off (load tests)
+  PG_POOL_MAX: ${PG_POOL_MAX:-10}                  # per process: size it against Postgres max_connections
+  AI_PROVIDER: ${AI_PROVIDER:-mock}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hub
+      POSTGRES_PASSWORD: hub-dev-only   # local demo only
+      POSTGRES_DB: hub
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hub -d hub"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["node", "apps/server/dist/migrate.js"]
+    environment: *server-env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    build: .
+    environment:
+      <<: *server-env
+      ROLE: api
+    ports: ["127.0.0.1:3000:3000"]   # demo auth: keep it off the LAN
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: .
+    environment:
+      <<: *server-env
+      ROLE: worker
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports: ["127.0.0.1:8080:80"]
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  pgdata:
