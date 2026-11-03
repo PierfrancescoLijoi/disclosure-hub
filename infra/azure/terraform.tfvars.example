@@ -1,0 +1,16 @@
+# Copy to <environment>.tfvars (ignored by git) and fill in. Nothing here is a secret.
+environment         = "prod"
+location            = "uksouth"
+tags                = { owner = "ir-platform@example.com", cost_centre = "investor-relations" }
+alert_email         = "ir-oncall@example.com"
+dba_group_object_id = "00000000-0000-0000-0000-000000000000" # Entra group that administers PostgreSQL
+default_company_id  = "acme"
+issuers_json        = "[{\"id\":\"acme\",\"name\":\"Acme plc\",\"profiles\":{\"UK\":{\"tidm\":\"ACME\",\"lei\":\"213800EXAMPLE0000LEI\"}}}]"
+github_repository   = "your-org/disclosure-hub"
+role_groups = {
+  author            = "00000000-0000-0000-0000-000000000001"
+  company_secretary = "00000000-0000-0000-0000-000000000002"
+  legal             = "00000000-0000-0000-0000-000000000003"
+  cfo               = "00000000-0000-0000-0000-000000000004"
+  publisher         = "00000000-0000-0000-0000-000000000005"
+}

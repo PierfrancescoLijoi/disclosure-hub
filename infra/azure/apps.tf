@@ -1,0 +1,281 @@
+locals {
+  tenant_authority = "https://login.microsoftonline.com/${data.azurerm_client_config.current.tenant_id}/v2.0"
+
+  # The same settings the local Compose file sets (docker-compose.yml): the code does not know which cloud
+  # it runs in, these names select the adapters.
+  common_env = {
+    AUTH_MODE           = "oidc"
+    OIDC_ISSUER         = local.tenant_authority
+    OIDC_AUDIENCE       = azuread_application.api.client_id
+    OIDC_ROLES_CLAIM    = "roles"
+    OIDC_DEFAULT_ISSUER = var.default_company_id
+    OIDC_AUTHORITY      = local.tenant_authority
+    OIDC_SPA_CLIENT_ID  = azuread_application.web.client_id
+    OIDC_SPA_SCOPE      = "api://${azuread_application.api.client_id}/access_as_user openid profile offline_access"
+    DATABASE_AUTH       = "azure-managed-identity"
+    PG_SSL              = "require"
+    QUEUE_URL           = "pg"
+    AUTO_MIGRATE        = "0"
+    DEMO                = "0"
+    PG_POOL_MAX         = "5"
+    AI_PROVIDER         = var.ai_provider
+    NODE_ENV            = "production"
+  }
+
+  anthropic_secret = var.ai_provider == "anthropic"
+}
+
+resource "azurerm_container_app_environment" "main" {
+  name                       = "cae-${local.name}"
+  location                   = azurerm_resource_group.main.location
+  resource_group_name        = azurerm_resource_group.main.name
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
+  logs_destination           = "log-analytics"
+  infrastructure_subnet_id   = azurerm_subnet.aca.id
+  zone_redundancy_enabled    = true
+  tags                       = local.tags
+
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+  }
+
+  lifecycle {
+    ignore_changes = [infrastructure_resource_group_name]
+  }
+}
+
+# ------------------------------------------------------------------ api (also serves the web app)
+
+resource "azurerm_container_app" "api" {
+  name                         = local.api_app_name
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  resource_group_name          = azurerm_resource_group.main.name
+  revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
+  tags                         = local.tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.app.id
+  }
+
+  dynamic "secret" {
+    for_each = local.anthropic_secret ? [1] : []
+    content {
+      name                = "anthropic-api-key"
+      key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/${var.anthropic_secret_name}"
+      identity            = azurerm_user_assigned_identity.app.id
+    }
+  }
+
+  ingress {
+    external_enabled           = true
+    target_port                = 3000
+    transport                  = "auto"
+    allow_insecure_connections = false # TLS terminates at the platform ingress; plain HTTP is redirected
+
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
+  template {
+    min_replicas = var.api_replicas.min
+    max_replicas = var.api_replicas.max
+
+    # Scale on concurrent requests: one replica comfortably serves the whole small-company profile
+    # (docs/SIZING.md), two exist for zone redundancy and rolling deploys, the rest is headroom.
+    http_scale_rule {
+      name                = "concurrency"
+      concurrent_requests = "50"
+    }
+
+    container {
+      name   = "api"
+      image  = var.api_image
+      cpu    = 0.5
+      memory = "1Gi"
+
+      dynamic "env" {
+        for_each = merge(local.common_env, { ROLE = "api", DATABASE_URL = local.database_url.app, AZURE_CLIENT_ID = azurerm_user_assigned_identity.app.client_id })
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.anthropic_secret ? [1] : []
+        content {
+          name        = "ANTHROPIC_API_KEY"
+          secret_name = "anthropic-api-key"
+        }
+      }
+
+      startup_probe {
+        transport               = "HTTP"
+        port                    = 3000
+        path                    = "/healthz"
+        interval_seconds        = 3
+        failure_count_threshold = 20
+      }
+
+      liveness_probe {
+        transport               = "HTTP"
+        port                    = 3000
+        path                    = "/healthz"
+        interval_seconds        = 10
+        failure_count_threshold = 3
+      }
+
+      # Not ready (database or queue down) takes the replica out of rotation without restarting it.
+      readiness_probe {
+        transport               = "HTTP"
+        port                    = 3000
+        path                    = "/readyz"
+        interval_seconds        = 5
+        failure_count_threshold = 3
+      }
+    }
+  }
+
+  lifecycle {
+    # The deployment pipeline owns the image; Terraform owns everything around it.
+    ignore_changes = [template[0].container[0].image]
+  }
+}
+
+# ------------------------------------------------------------------ worker (publication runner and sweeper)
+
+resource "azurerm_container_app" "worker" {
+  name                         = "ca-${local.name}-worker"
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  resource_group_name          = azurerm_resource_group.main.name
+  revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
+  tags                         = local.tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.app.id
+  }
+
+  dynamic "secret" {
+    for_each = local.anthropic_secret ? [1] : []
+    content {
+      name                = "anthropic-api-key"
+      key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/${var.anthropic_secret_name}"
+      identity            = azurerm_user_assigned_identity.app.id
+    }
+  }
+
+  template {
+    min_replicas = var.worker_replicas.min
+    max_replicas = var.worker_replicas.max
+
+    # No ingress, so no request count to scale on. Publication work is short and the lease makes any
+    # number of workers safe; CPU is a sufficient signal at this size.
+    custom_scale_rule {
+      name             = "cpu"
+      custom_rule_type = "cpu"
+      metadata = {
+        type  = "Utilization"
+        value = "70"
+      }
+    }
+
+    container {
+      name   = "worker"
+      image  = var.api_image
+      cpu    = 0.5
+      memory = "1Gi"
+
+      dynamic "env" {
+        for_each = merge(local.common_env, { ROLE = "worker", DATABASE_URL = local.database_url.app, AZURE_CLIENT_ID = azurerm_user_assigned_identity.app.client_id })
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.anthropic_secret ? [1] : []
+        content {
+          name        = "ANTHROPIC_API_KEY"
+          secret_name = "anthropic-api-key"
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+}
+
+# ------------------------------------------------------------------ migrate (run by the pipeline before every rollout)
+
+resource "azurerm_container_app_job" "migrate" {
+  name                         = "caj-${local.name}-migrate"
+  location                     = azurerm_resource_group.main.location
+  resource_group_name          = azurerm_resource_group.main.name
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  workload_profile_name        = "Consumption"
+  replica_timeout_in_seconds   = 600
+  replica_retry_limit          = 1
+  tags                         = local.tags
+
+  manual_trigger_config {
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.migrate.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.migrate.id
+  }
+
+  template {
+    container {
+      name    = "migrate"
+      image   = var.api_image
+      cpu     = 0.25
+      memory  = "0.5Gi"
+      command = ["node", "apps/server/dist/migrate.js"]
+
+      dynamic "env" {
+        for_each = merge(local.common_env, {
+          DATABASE_URL      = local.database_url.migrate
+          AZURE_CLIENT_ID   = azurerm_user_assigned_identity.migrate.client_id
+          SEED_ISSUERS_JSON = var.issuers_json
+          PG_POOL_MAX       = "2"
+        })
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+}

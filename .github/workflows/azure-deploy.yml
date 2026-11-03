@@ -1,0 +1,91 @@
+# Build once, promote by digest. Signs in to Azure with a federated credential (no stored secret).
+# NOT RUN YET: written against the documented behaviour of the actions and the Azure CLI. First use is
+# listed in infra/azure/README.md; set the repository variables below in the GitHub environment.
+name: azure-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        type: choice
+        options: [test, prod]
+        default: test
+
+permissions:
+  id-token: write # request the OIDC token for the federated credential
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # The GitHub environment name must equal the Terraform environment: the federated credential's
+    # subject is repo:<owner>/<name>:environment:<name>. Add required reviewers on prod.
+    environment: ${{ inputs.environment }}
+    concurrency: azure-${{ inputs.environment }}
+    env:
+      # From `terraform output` after the first apply; stored as environment variables, none is secret.
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      REGISTRY: ${{ vars.REGISTRY_LOGIN_SERVER }}
+      MIGRATE_JOB: ${{ vars.MIGRATE_JOB }}
+      WORKLOAD: dhub
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Test (SQLite suite; the PostgreSQL suite runs in CI against service containers)
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push the image (once; the digest is what gets deployed)
+        id: image
+        run: |
+          az acr login --name "${REGISTRY%%.*}"
+          docker build -t "$REGISTRY/hub-server:${GITHUB_SHA}" .
+          docker push "$REGISTRY/hub-server:${GITHUB_SHA}"
+          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/hub-server:${GITHUB_SHA}")
+          echo "ref=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Migrate the database (the job fails the deployment if a migration fails)
+        run: |
+          az containerapp job update -g "$RESOURCE_GROUP" -n "$MIGRATE_JOB" --image "${{ steps.image.outputs.ref }}"
+          EXECUTION=$(az containerapp job start -g "$RESOURCE_GROUP" -n "$MIGRATE_JOB" --query name -o tsv)
+          for i in $(seq 1 60); do
+            STATUS=$(az containerapp job execution show -g "$RESOURCE_GROUP" -n "$MIGRATE_JOB" --job-execution-name "$EXECUTION" --query properties.status -o tsv)
+            case "$STATUS" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded) echo "migration $STATUS"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "migration did not finish in 10 minutes"; exit 1
+
+      - name: Roll out api and worker (new revision replaces the old one only when it is ready)
+        run: |
+          for APP in api worker; do
+            az containerapp update -g "$RESOURCE_GROUP" -n "ca-${WORKLOAD}-${{ inputs.environment }}-$APP" --image "${{ steps.image.outputs.ref }}"
+          done
+
+      - name: Smoke test
+        run: |
+          FQDN=$(az containerapp show -g "$RESOURCE_GROUP" -n "ca-${WORKLOAD}-${{ inputs.environment }}-api" --query properties.configuration.ingress.fqdn -o tsv)
+          for i in $(seq 1 30); do
+            curl -fsS "https://$FQDN/readyz" && exit 0
+            sleep 10
+          done
+          echo "api never became ready"; exit 1
