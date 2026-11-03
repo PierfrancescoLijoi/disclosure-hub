@@ -14,6 +14,7 @@ import { isValidIsin, isValidLei, isValidTidm } from './identifiers.js';
 const TZ = 'Europe/London';
 const ASAP_WARN_MINUTES = 60;
 const MIN_DELAY_JUSTIFICATION = 30;
+const PDMR_BUSINESS_DAYS = 3;
 
 const text = (title: string) => z.string().trim().min(1).meta({ title });
 const date = (title: string) => z.iso.date().meta({ title });
@@ -82,6 +83,11 @@ const pdmrRules: Rule<z.infer<typeof pdmr>>[] = [
     meta.transactionDate > meta.notifiedAt
       ? [error('UK_MAR_PDMR_DATES', 'Transaction date is after the notification date', 'metadata.transactionDate')]
       : [],
+  // Art. 19(1): the PDMR must tell the issuer within 3 business days of the transaction.
+  ({ meta }) =>
+    meta.notifiedAt > addBusinessDays(meta.transactionDate, PDMR_BUSINESS_DAYS, UK_BANK_HOLIDAYS)
+      ? [warning('UK_MAR_PDMR_LATE_NOTIFICATION', `The PDMR told the issuer more than ${PDMR_BUSINESS_DAYS} business days after the transaction (Art. 19(1)); record the reason`, 'metadata.notifiedAt')]
+      : [],
 ];
 
 const resultsRules: Rule<z.infer<typeof results>>[] = [
@@ -110,6 +116,7 @@ export const ukPolicy = definePolicy({
       rules: insideInfoRules,
       approval: { min: 2, mustInclude: ['company_secretary'] },
       deadline: () => ({ at: null, basis: 'As soon as possible (UK MAR Art. 17(1))' }),
+      releaseOutsideWindow: true,
     },
     pdmr_dealing: {
       label: 'PDMR dealing notification (UK MAR Art. 19)',
@@ -117,8 +124,8 @@ export const ukPolicy = definePolicy({
       rules: pdmrRules,
       approval: { min: 1, mustInclude: ['company_secretary'] },
       deadline: ({ meta }) => ({
-        at: endOfDay(addBusinessDays(meta.notifiedAt, 3, UK_BANK_HOLIDAYS)),
-        basis: 'Within 3 business days of notification (UK MAR Art. 19)',
+        at: endOfDay(addBusinessDays(meta.transactionDate, PDMR_BUSINESS_DAYS, UK_BANK_HOLIDAYS)),
+        basis: 'Issuer must publish within 3 business days of the transaction (UK MAR Art. 19(3))',
       }),
     },
     results: {

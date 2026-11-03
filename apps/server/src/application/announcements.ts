@@ -48,6 +48,8 @@ export interface TimingView {
   deadline: { at: string | null; basis: string } | null;
   overdue: boolean;
   window: { open: boolean; nextOpenAt: string | null };
+  /** False for urgent categories: a closed window does not hold them. */
+  holdWhenClosed: boolean;
 }
 
 export interface AnnouncementView {
@@ -413,6 +415,7 @@ export class AnnouncementService {
       timing: timing && {
         deadline: timing.deadline && { at: timing.deadline.at ? iso(timing.deadline.at) : null, basis: timing.deadline.basis },
         overdue: timing.overdue,
+        holdWhenClosed: timing.holdWhenClosed,
         window: { open: timing.window.open, nextOpenAt: timing.window.nextOpenAt ? iso(timing.window.nextOpenAt) : null },
       },
       actions: availableActions(a.status, actor),

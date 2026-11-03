@@ -115,9 +115,9 @@ export class PublicationRunner {
     if (problem) return this.reject(claimed, token, 'APPROVAL_STALE', problem);
 
     if (this.d.config.enforceWindows) {
-      const { window } = policy.timing(ctx);
-      // A closed channel always holds the release; with no known opening, look again in an hour.
-      if (!window.open) return this.defer(claimed, token, window.nextOpenAt ?? new Date(now.getTime() + RECHECK_CLOSED_MS));
+      const { window, holdWhenClosed } = policy.timing(ctx);
+      // A closed channel holds a routine release (urgent categories go out regardless); with no known opening, look again in an hour.
+      if (holdWhenClosed && !window.open) return this.defer(claimed, token, window.nextOpenAt ?? new Date(now.getTime() + RECHECK_CLOSED_MS));
     }
 
     let ack: PublishAck;

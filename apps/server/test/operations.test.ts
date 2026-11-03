@@ -43,6 +43,21 @@ describe('release windows', () => {
     expect(await env.rt.runner.run(pubId)).toBe('published');
   });
 
+  it('never holds inside information for the channel window, while a general notice waits', async () => {
+    const clock = new FakeClock(new Date('2026-11-07T10:00:00Z')); // Saturday: RNS closed
+    env = await makeEnv({ clock, manualQueue: true, env: { ENFORCE_WINDOWS: '1' } });
+    const inside = fx.ukInside();
+    inside.metadata = { ...inside.metadata, informationBecameKnownAt: '2026-11-07T09:55:00Z' };
+    const urgent = await approvedAndPublishing(env, inside, [env.actors.bob, env.actors.carol]);
+    expect(await env.rt.runner.run(urgent.pubId)).toBe('published');
+
+    const routine = await approvedAndPublishing(env, fx.ukGeneral());
+    expect(await env.rt.runner.run(routine.pubId)).toBe('deferred');
+
+    const view = await env.svc.get(env.actors.erin, urgent.id);
+    expect(view.timing).toMatchObject({ window: { open: false }, holdWhenClosed: false });
+  });
+
   it('sends immediately when windows are not enforced (the demo default)', async () => {
     const clock = new FakeClock(new Date('2026-11-07T10:00:00Z'));
     env = await makeEnv({ clock, manualQueue: true });

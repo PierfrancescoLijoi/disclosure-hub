@@ -12,12 +12,18 @@
 | ASR-7 | Tenant filter (`issuer_id`) inside every query; composite keys | FR-10 | Postgres RLS, schema per large tenant |
 | ASR-8 | AI behind a port, advisory report stored apart, never a guard | FR-11 | Evals gate before enabling real LLM |
 | ASR-9 | Kysely over SQLite/Postgres, same migrations, ISO-text timestamps, JSON as text | G4 | JSONB on Postgres for querying |
+| ASR-10 | OIDC bearer tokens verified against a JWKS; roles and company from claims; persona picker only when DEMO is on | L-11 | Per-role step-up, SCIM |
+| ASR-11 | Queue behind a port: in-process, PostgreSQL LISTEN/NOTIFY, BullMQ; the DB row stays the truth | ASR-3 | Transactional outbox |
+| ASR-12 | A category declares whether a closed channel window holds it (inside information does not) | BR-10 | Per-channel out-of-hours procedures |
+| ASR-13 | Deadlines are computed from category metadata, may be absent (voluntary items) or per item (Item 1.05) | BR-2, BR-4 | Obligation tracking beyond one deadline |
+| ASR-14 | Issuer profile per jurisdiction carries the identifiers and the status the form depends on (US filer status) | BR-9 | Profiles from an admin UI |
+| ASR-15 | Azure Terraform twin of the Compose stack, validated offline, never applied | L-17 | First deploy checklist in infra/azure/README.md |
 
 ## MVP slice
 Both jurisdictions end to end with tests, then UI, then Compose, then AI. Cut order: AI, UI polish, extra categories.
 
 ## Risks and assumptions
-Rules are simplified (L-10). Compose path is only as verified as the Docker daemon allowed on the build machine (see README). Mock gateways are in-process models of vendor behaviour, not vendor contracts.
+Rules are simplified (L-10) and corrected where a domain review found errors (L-19 to L-22); the remaining known limits are in L-23 to L-25 and at the end of spec.md. Compose is verified on Docker; Azure is not (L-17). Mock gateways are in-process models of vendor behaviour, not vendor contracts, and the idempotency lookup they offer may not exist at a real provider (L-23).
 
 ## Next move
 Build per `docs/ARCHITECTURE.md` in the repo.

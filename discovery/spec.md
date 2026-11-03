@@ -10,7 +10,9 @@ Listed issuers must release regulated information to the market under jurisdicti
 - G4: same business logic, API and state transitions in both run modes; only infrastructure adapters differ.
 
 ## Out of scope
-Real newswire/EDGAR integration, real SSO, scheduled/embargoed release, attachments and Inline XBRL, translations, billing, HA infrastructure, mobile.
+Real newswire/EDGAR integration, scheduled/embargoed release, attachments and Inline XBRL, translations, billing, mobile.
+Built since the first cut (no longer out of scope): OIDC sign-in (Entra ID, Keycloak), the PostgreSQL queue, the Compose twin, and an Azure Terraform deployment that is validated offline and never applied.
+Known limits of the regulatory model (what a compliance expert would ask about) are listed at the end of this file.
 
 ## Actors
 Author (IR team), Approver (company secretary, general counsel, CFO), Publisher (head of IR), Issuer admin (out of scope), Regulator/newswire (external), Auditor (reads audit trail). Sponsor/payer: issuer's IR or legal function.
@@ -54,16 +56,18 @@ Author (IR team), Approver (company secretary, general counsel, CFO), Publisher 
 
 ## Business rules
 - BR-1 (UK) Inside information is disclosed as soon as possible; a delayed disclosure needs a recorded justification (modelled from MAR Art. 17(4)).
-- BR-2 (UK) PDMR dealing notifications are announced within 3 business days of the notification (MAR Art. 19).
+- BR-2 (UK) The issuer publishes a PDMR dealing within 3 business days of the transaction (MAR Art. 19(3)); the clock starts at the transaction, not when the issuer was told. A PDMR who told the issuer later than 3 business days after the transaction (Art. 19(1)) raises a warning.
 - BR-3 (UK) Inside-information announcements need two approvals including the company secretary; others need one.
-- BR-4 (US) Form 8-K is due 4 business days after the triggering event; late is a warning, not a block.
-- BR-5 (US) Item 2.02 needs Exhibit 99.1 and is furnished, not filed; Item 7.01 (Reg FD) carries intentional vs unintentional selective disclosure; unintentional needs prompt disclosure (later of 24 hours or next NYSE open).
+- BR-4 (US) A domestic filer's Form 8-K is due 4 business days after the triggering event; late is a warning, not a block. Items 7.01 and 8.01 are voluntary, so an 8-K that reports only those has no deadline. Item 1.05 (cybersecurity) counts the 4 business days from the materiality determination, which the author must record. Item 5.07 (votes) follows the standard clock.
+- BR-5 (US) Item 2.02 needs Exhibit 99.1 and is furnished, not filed; Item 7.01 (Reg FD) carries intentional vs unintentional selective disclosure; unintentional needs prompt disclosure (later of 24 hours or the next NYSE open after the senior official learned of it, today's open if it has not happened yet).
 - BR-6 (US) 8-K needs two approvals including legal.
 - BR-7 Filings accepted after 17:30 ET carry the next business day as filing date.
 - BR-8 Approvals are void when the content changes.
+- BR-9 (US) The issuer profile records whether the issuer is a domestic filer or a foreign private issuer. Domestic filers file Form 8-K; foreign private issuers file Form 6-K (no fixed deadline: promptly after the information is public at home). Filing the wrong form is an error.
+- BR-10 (UK) Inside information is never held for the channel's opening hours, because the duty is "as soon as possible". Routine categories wait for the window when windows are enforced.
 
 ## Non-functional requirements (scale / target / meter)
-- NFR-1 Tenants: 5,000 issuers; 50k announcements/year steady; burst 500 publications in 30 minutes (earnings clusters). Meter: load script against the compose stack.
+- NFR-1 Tenants: sized for one listed group or a small IR agency (up to 5 issuers, ~300 announcements a month, burst 100 publications in 10 minutes); 10x headroom by replica count. The first 5,000-issuer figure was a market-operator guess and was dropped; the reasoning and measurements are in docs/SIZING.md.
 - NFR-2 API p95 < 200 ms for reads and transitions, excluding gateway. Meter: request histogram.
 - NFR-3 Enqueue-to-ack p95 < 5 s excluding gateway latency. Meter: publication timestamps.
 - NFR-4 Durability: an acknowledged approval or ack is never lost (commit before enqueue; DB is source of truth). RPO 0 on the DB.
@@ -78,4 +82,15 @@ Author (IR team), Approver (company secretary, general counsel, CFO), Publisher 
 | RNS / FCA-approved RIS | LSEG / vendor | API or SFTP (assumed) | Mock gateway, RNS number ack |
 | EDGAR | SEC | EDGAR Next API (assumed) | Mock gateway, accession + acceptance/suspense |
 | LLM provider | Anthropic (optional) | HTTPS JSON | Port + mock default |
-| IdP | Customer | OIDC | Out of scope |
+| IdP | Customer | OIDC (Entra ID, Keycloak); persona picker only in demo mode | Built; Keycloak verified, Entra ID designed |
+
+## Known limits of the regulatory model
+Simplified on purpose. A compliance expert should expect to hear these first:
+- Real RIS and EDGAR APIs have no standard idempotency key and no "find by key" call. The mock models that capability so the reconciliation logic can be tested; against a real provider it becomes a lookup by headline, time and issuer, or a check of the provider's own history, and needs its own design.
+- EDGAR access: EDGAR Next replaced the old access model, and the CIK Confirmation Code may now be legacy. Verify the current credential model before any real filing. The 17:30 ET cut-off is the general rule for an 8-K; some form types have other cut-offs.
+- No scheduled or embargoed release, although earnings and the 07:00 London open depend on it.
+- No correction or supplementary announcement after publication: published and withdrawn are terminal.
+- One announcement for a dual-listed issuer is two independent announcements; they are not linked.
+- UK MAR items not modelled: insider lists (Art. 18), closed periods for PDMRs (Art. 19(11)), the 20,000 euro dealing threshold (Art. 19(8)), the FCA notification of a delay as a tracked task rather than a post-publication reminder, and DTR 5 major-holdings notifications (TR-1).
+- US items not modelled: Forms 10-Q and 10-K, Section 16 forms, other 8-K items beyond 1.01, 1.05, 2.02, 5.02, 5.07, 7.01 and 8.01, and a Reg FD intentional disclosure (which requires simultaneous public disclosure) as a timed duty.
+- The AI pre-check is advisory; liability for the disclosure stays with the issuer.

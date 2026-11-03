@@ -13,7 +13,7 @@ function PublicFrame({ children }: { children: ReactNode }) {
     <>
       <header className="public-top">
         <Logo />
-        <strong>SignalFlow IR</strong>
+        <strong>Disclosure Hub</strong>
         <span style={{ flex: 1 }} />
         <Link to="/login">Staff sign-in</Link>
       </header>

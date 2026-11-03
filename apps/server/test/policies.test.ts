@@ -12,7 +12,7 @@ const issuer: Issuer = {
   name: 'Northwind Energy plc',
   profiles: {
     UK: { tidm: 'NWE', lei: makeLei('5299000NORTHWINDEN') },
-    US: { cik: '0001234567', ccc: 'nw3n3rgy', ticker: 'NWEY' },
+    US: { cik: '0001234567', ccc: 'nw3n3rgy', ticker: 'NWEY', filerStatus: 'domestic' },
   },
 };
 
@@ -107,6 +107,19 @@ describe('UK policy', () => {
     expect(codes(ukPolicy.validate(input('pdmr_dealing', late)))).toEqual(['DEADLINE_PASSED']);
   });
 
+  it('counts the PDMR deadline from the transaction, not from when the issuer was told', () => {
+    const slow = pdmr({ transactionDate: '2026-11-02', notifiedAt: '2026-11-05' }); // Mon transaction: due Thu 5 Nov
+    const t = ukPolicy.timing(context(ukPolicy, 'pdmr_dealing', slow));
+    expect(t.deadline?.at?.toISOString()).toBe('2026-11-05T23:59:00.000Z');
+    expect(t.deadline?.basis).toContain('transaction');
+    expect(ukPolicy.validate(input('pdmr_dealing', slow))).toEqual([]);
+  });
+
+  it('warns when the PDMR told the issuer later than three business days after the transaction', () => {
+    const issues = ukPolicy.validate(input('pdmr_dealing', pdmr({ transactionDate: '2026-10-26', notifiedAt: '2026-10-30' })));
+    expect(issues.map((i) => [i.code, i.severity])).toEqual([['UK_MAR_PDMR_LATE_NOTIFICATION', 'warning'], ['DEADLINE_PASSED', 'warning']]);
+  });
+
   it('validates ISIN and date order for PDMR dealings', () => {
     expect(errors(ukPolicy.validate(input('pdmr_dealing', pdmr({ isin: 'GB0007980590' }))))).toEqual(['INVALID_ISIN']);
     expect(errors(ukPolicy.validate(input('pdmr_dealing', pdmr({ transactionDate: '2026-11-03', notifiedAt: '2026-11-02' }))))).toEqual(['UK_MAR_PDMR_DATES']);
@@ -151,11 +164,12 @@ describe('UK policy', () => {
 describe('US policy', () => {
   const signatory = { name: 'Carol Diaz', title: 'General Counsel' };
   const k8 = (over: Record<string, unknown> = {}) => ({ eventDate: '2026-11-02', items: ['8.01'], signatory, ...over });
+  const due = (over: Record<string, unknown>) => k8({ items: ['1.01'], ...over });
 
   it('computes the 8-K due date as four business days with the 17:30 ET cut-off', () => {
-    expect(usPolicy.timing(context(usPolicy, 'form_8k', k8())).deadline?.at?.toISOString()).toBe('2026-11-06T22:30:00.000Z');
+    expect(usPolicy.timing(context(usPolicy, 'form_8k', due({}))).deadline?.at?.toISOString()).toBe('2026-11-06T22:30:00.000Z');
     // Veterans Day (Wed 11 Nov) is a federal holiday: Fri 6 Nov + 4 business days is Fri 13 Nov.
-    expect(usPolicy.timing(context(usPolicy, 'form_8k', k8({ eventDate: '2026-11-06' }))).deadline?.at?.toISOString()).toBe('2026-11-13T22:30:00.000Z');
+    expect(usPolicy.timing(context(usPolicy, 'form_8k', due({ eventDate: '2026-11-06' }))).deadline?.at?.toISOString()).toBe('2026-11-13T22:30:00.000Z');
   });
 
   it('tightens the deadline to the Reg FD prompt limit after an unintentional selective disclosure', () => {
@@ -169,6 +183,66 @@ describe('US policy', () => {
     expect(usPolicy.timing(context(usPolicy, 'form_8k', friday)).deadline?.at?.toISOString()).toBe('2026-11-09T14:30:00.000Z');
   });
 
+  it('treats a Reg FD disclosure learned before the open as due 24 hours later, not at the next day open', () => {
+    // Monday 08:00 ET: today's 09:30 open is the next commencement of trading, so the 24 hours (Tuesday 08:00 ET) are the later limit.
+    const early = k8({ eventDate: '2026-11-02', items: ['7.01'], regFd: { selectiveDisclosure: 'unintentional', learnedAt: '2026-11-02T13:00:00Z' } });
+    expect(usPolicy.timing(context(usPolicy, 'form_8k', early)).deadline?.at?.toISOString()).toBe('2026-11-03T13:00:00.000Z');
+  });
+
+  it('sets no Form 8-K deadline when only voluntary Items 7.01 and 8.01 are reported', () => {
+    for (const items of [['8.01'], ['7.01'], ['7.01', '8.01']]) {
+      const t = usPolicy.timing(context(usPolicy, 'form_8k', k8({ items, regFd: { selectiveDisclosure: 'none' } })));
+      expect(t.deadline).toMatchObject({ at: null });
+      expect(t.deadline?.basis).toContain('voluntary');
+    }
+    // Any mandatory item restores the four-business-day clock.
+    expect(usPolicy.timing(context(usPolicy, 'form_8k', k8({ items: ['8.01', '1.01'] }))).deadline?.at?.toISOString()).toBe('2026-11-06T22:30:00.000Z');
+  });
+
+  it('starts the Item 1.05 clock at the materiality determination, not at the incident', () => {
+    const cyber = k8({ eventDate: '2026-10-26', items: ['1.05'], cyber: { materialityDeterminedAt: '2026-11-02T15:00:00Z' } });
+    const t = usPolicy.timing(context(usPolicy, 'form_8k', cyber));
+    expect(t.deadline?.at?.toISOString()).toBe('2026-11-06T22:30:00.000Z'); // 4 business days after Mon 2 Nov, not after 26 Oct
+    expect(t.deadline?.basis).toContain('materiality');
+    expect(errors(usPolicy.validate(input('form_8k', cyber)))).toEqual([]);
+    expect(errors(usPolicy.validate(input('form_8k', k8({ items: ['1.05'] }))))).toEqual(['US_8K_1_05_DETAILS']);
+    expect(errors(usPolicy.validate(input('form_8k', k8({ items: ['1.05'], cyber: { materialityDeterminedAt: '2026-11-04T09:00:00Z' } }))))).toEqual(['FUTURE_TIMESTAMP']);
+  });
+
+  it('accepts Item 5.07 votes and keeps the standard clock', () => {
+    const vote = k8({ items: ['5.07'] });
+    expect(errors(usPolicy.validate(input('form_8k', vote)))).toEqual([]);
+    expect(usPolicy.timing(context(usPolicy, 'form_8k', vote)).deadline?.at?.toISOString()).toBe('2026-11-06T22:30:00.000Z');
+  });
+
+  describe('filer status', () => {
+    const withStatus = (filerStatus?: string): Issuer => ({
+      ...issuer,
+      profiles: { ...issuer.profiles, US: { cik: '0001234567', ccc: 'nw3n3rgy', ticker: 'NWEY', ...(filerStatus ? { filerStatus } : {}) } },
+    });
+    const k6 = { reportDate: '2026-11-02', basis: 'home_country_law', signatory };
+
+    it('requires the issuer profile to say whether the issuer is a domestic or foreign private issuer', () => {
+      expect(codes(usPolicy.validate(input('form_8k', k8(), { issuer: withStatus() })))).toContain('ISSUER_PROFILE_INCOMPLETE');
+    });
+
+    it('stops a foreign private issuer from filing a Form 8-K and a domestic filer from filing a Form 6-K', () => {
+      expect(errors(usPolicy.validate(input('form_8k', k8(), { issuer: withStatus('foreign_private') })))).toEqual(['US_FILER_STATUS']);
+      expect(errors(usPolicy.validate(input('form_6k', k6, { issuer: withStatus('domestic') })))).toEqual(['US_FILER_STATUS']);
+    });
+
+    it('lets a foreign private issuer furnish a Form 6-K with no fixed deadline', () => {
+      const fpi = withStatus('foreign_private');
+      expect(errors(usPolicy.validate(input('form_6k', k6, { issuer: fpi })))).toEqual([]);
+      const t = usPolicy.timing(context(usPolicy, 'form_6k', k6));
+      expect(t.deadline).toMatchObject({ at: null });
+      const out = usPolicy.render({ ...context(usPolicy, 'form_6k', k6), issuer: fpi });
+      expect(out.attributes).toMatchObject({ formType: '6-K', items: [] });
+      expect(out.content).toContain('FORM 6-K');
+      expect(usPolicy.approvalRequirement(context(usPolicy, 'form_6k', k6))).toEqual({ min: 2, mustInclude: ['legal'] });
+    });
+  });
+
   it('enforces item-specific requirements', () => {
     expect(errors(usPolicy.validate(input('form_8k', k8({ items: ['2.02'] }))))).toEqual(['US_8K_2_02_EXHIBIT']);
     expect(errors(usPolicy.validate(input('form_8k', k8({ items: ['2.02'], exhibit99_1: true }))))).toEqual([]);
@@ -180,7 +254,7 @@ describe('US policy', () => {
   });
 
   it('warns about a late 8-K without blocking it', () => {
-    const issues = usPolicy.validate(input('form_8k', k8({ eventDate: '2026-10-20' })));
+    const issues = usPolicy.validate(input('form_8k', due({ eventDate: '2026-10-20' })));
     expect(issues.map((i) => [i.code, i.severity])).toEqual([['DEADLINE_PASSED', 'warning']]);
   });
 

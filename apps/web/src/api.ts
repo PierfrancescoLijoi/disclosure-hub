@@ -92,7 +92,7 @@ export interface View {
   validation: { ok: boolean; issues: Issue[]; at: string } | null;
   approvals: Approval[];
   publication: PublicationView | null;
-  timing: { deadline: { at: string | null; basis: string } | null; overdue: boolean; window: { open: boolean; nextOpenAt: string | null } } | null;
+  timing: { deadline: { at: string | null; basis: string } | null; overdue: boolean; holdWhenClosed: boolean; window: { open: boolean; nextOpenAt: string | null } } | null;
   actions: string[];
   obligations: string[];
 }

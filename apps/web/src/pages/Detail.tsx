@@ -114,7 +114,7 @@ export function Detail() {
                     <>Deadline: {timing.deadline.basis}. </>
                   ))}
                 {j.channel.name} is {timing.window.open ? 'open' : `closed until ${timing.window.nextOpenAt ? when(timing.window.nextOpenAt) : 'further notice'}`}
-                {s.config!.enforceWindows ? ' (releases are held while closed).' : ' (window not enforced in this run).'}
+                {!s.config!.enforceWindows ? ' (window not enforced in this run).' : timing.holdWhenClosed ? ' (releases are held while closed).' : ' (this category is urgent: it is released even while closed).'}
               </p>
             )}
           </section>

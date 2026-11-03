@@ -1,6 +1,6 @@
 # Web UI
 
-The UI follows the product spec `SignalFlow_IR_UI_UX_Product_Spec.md` (P0 scope), adapted to this backend.
+The UI follows the product spec `SignalFlow_IR_UI_UX_Product_Spec.md` (P0 scope), adapted to this backend. The spec's working name is SignalFlow IR; the product on screen is called Disclosure Hub everywhere.
 It is a Vite + React single-page app in `apps/web`, with `react-router-dom` for the routes below.
 All screens run against the same API in the three run modes (demo personas, Compose with Keycloak, Azure with Entra ID).
 

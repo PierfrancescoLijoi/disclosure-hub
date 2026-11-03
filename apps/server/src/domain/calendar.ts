@@ -105,6 +105,12 @@ export function windowStatus(now: Date, tz: string, window: OpeningWindow, cal: 
   if (businessToday && mins >= toMin(window.open) && mins < toMin(window.close)) {
     return { open: true, nextOpenAt: null };
   }
-  const openDay = businessToday && mins < toMin(window.open) ? today : nextBusinessDay(today, cal);
-  return { open: false, nextOpenAt: zonedToUtc(openDay, window.open, tz) };
+  return { open: false, nextOpenAt: nextOpenAfter(now, tz, window.open, cal) };
+}
+
+/** First session open (business days only, at `hhmm` local) strictly after `at`: today's if it has not happened yet. */
+export function nextOpenAfter(at: Date, tz: string, hhmm: string, cal: Calendar): Date {
+  const today = civilOf(at, tz);
+  const todays = zonedToUtc(today, hhmm, tz);
+  return isBusinessDay(today, cal) && at < todays ? todays : zonedToUtc(nextBusinessDay(today, cal), hhmm, tz);
 }

@@ -48,9 +48,9 @@ What the two jurisdictions actually differ on, as modelled:
 
 | | UK | US |
 |---|---|---|
-| Timing | MAR Art. 17: as soon as possible (a delay needs a recorded reason); PDMR: 3 business days; DTR 4 results deadlines | 8-K: 4 business days; Reg FD: later of 24 h or next market open |
-| Window | RNS hours | EDGAR 06:00 to 22:00 ET; after 17:30 ET the filing date is the next business day |
-| Extra | PDMR / results categories | Exhibit 99.1 required for item 2.02; Reg FD flag for item 7.01 |
+| Timing | MAR Art. 17: as soon as possible (a delay needs a recorded reason); PDMR: 3 business days from the transaction (Art. 19(3)); DTR 4 results deadlines | 8-K: 4 business days from the event; Item 1.05 from the materiality determination; Items 7.01 and 8.01 are voluntary, no deadline; Reg FD: later of 24 h or the next NYSE open after the official learned of it; 6-K: promptly, no fixed instant |
+| Window | RNS hours; inside information is never held for them | EDGAR 06:00 to 22:00 ET; after 17:30 ET the filing date is the next business day |
+| Extra | PDMR / results categories | Filer status in the issuer profile (8-K for domestic filers, 6-K for foreign private issuers); Exhibit 99.1 required for item 2.02; Reg FD flag for item 7.01 |
 | Acknowledgement | RNS number | accession number + filing date |
 
 ### 2.2 Publishing is the risky step, so it is built to be reliable, not fast
@@ -160,6 +160,8 @@ Cut in this order, to protect the end-to-end flow, test quality and publish reli
 - ~~Real authentication (OIDC / SSO)~~ **now built** (bearer tokens, Entra ID and Keycloak; MFA is the identity provider's policy). Still cut: per-role step-up for publish, SCIM user provisioning, a company-per-user mapping beyond one default or a token claim.
 - **Real newswire integrations.** Interfaces and error taxonomy are in place; vendor behaviour is unknown without access.
 - **Translations / multilingual notices, additional categories** (UK: more DTR items; US: more 8-K items).
+- **Regulatory scope a compliance expert will ask about** (full list at the end of discovery/spec.md): corrections and supplements after publication (published is terminal), links between the two announcements of a dual-listed issuer, insider lists (MAR Art. 18), PDMR closed periods and the 20,000 euro threshold, major-holdings notifications (DTR 5, TR-1), Forms 10-Q and 10-K, Section 16 forms, a timed duty for an intentional Reg FD disclosure.
+- **Provider facts to verify before a real filing.** Real RIS and EDGAR offer no idempotency-key lookup, so the "find before resubmit" step needs a different design there (search by headline, time and issuer, or the provider's history). EDGAR Next changed access and the CIK Confirmation Code may be legacy. The 17:30 ET cut-off is the 8-K rule; other forms differ.
 - **Notifications** (email/Slack to approvers), **reporting** and search.
 - **Distributed tracing.** Structured logs and a metrics endpoint exist; no OpenTelemetry traces across api, queue and worker.
 
@@ -169,7 +171,7 @@ Verified by running it:
 
 - Draft to published in UK and US through the UI, the REST demo and the tests.
 - Retry with backoff, exhaustion and manual retry, permanent rejection, lost acknowledgement (reconciled), lease takeover after a crash, lost wake-up recovery by the sweeper.
-- Same suite on SQLite (114 tests, 7 skipped) and on PostgreSQL + Redis (121 tests, including two workers), plus 12 UI logic tests. The screens are described in docs/UI.md.
+- Same suite on SQLite (124 tests, 7 skipped) and on PostgreSQL + Redis (131 tests, including two workers), plus 12 UI logic tests. The screens are described in docs/UI.md.
 - Real authentication: tokens verified against a JWKS (valid, expired, wrong audience or issuer, forged, unknown role, provider down), and sign-in with Authorization Code + PKCE through a real browser against Keycloak.
 - The PostgreSQL queue on a real database, with two workers and after the listener connection is cut.
 - The Compose twin (Keycloak, PostgreSQL queue, migrate job, 2 workers) with the demo and a benchmark using real tokens.

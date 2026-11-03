@@ -20,20 +20,20 @@ export async function seedDemo(db: Kysely<DB>): Promise<void> {
       name: 'Northwind Energy plc',
       profiles: {
         UK: { tidm: 'NWE', lei: makeLei('5299000NORTHWINDEN') },
-        US: { cik: '0001234567', ccc: 'nw3n3rgy', ticker: 'NWEY' },
+        US: { cik: '0001234567', ccc: 'nw3n3rgy', ticker: 'NWEY', filerStatus: 'domestic' },
       },
     },
     {
       id: 'contoso',
       name: 'Contoso Biologics Inc.',
-      profiles: { US: { cik: '0007654321', ccc: 'c0nt0s0#', ticker: 'CNTS' } },
+      profiles: { US: { cik: '0007654321', ccc: 'c0nt0s0#', ticker: 'CNTS', filerStatus: 'domestic' } },
     },
   ];
   for (const i of issuers) {
     await db
       .insertInto('issuers')
       .values({ id: i.id, name: i.name, profiles: JSON.stringify(i.profiles) })
-      .onConflict((oc) => oc.column('id').doNothing())
+      .onConflict((oc) => oc.column('id').doUpdateSet({ profiles: JSON.stringify(i.profiles) }))
       .execute();
   }
   for (const u of DEMO_USERS) {

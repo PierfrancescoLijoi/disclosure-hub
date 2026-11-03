@@ -157,8 +157,8 @@ export class MockEdgarGateway extends MockGateway {
     if (!isValidCik(String(a.cik)) || !isValidCcc(String(a.ccc))) {
       throw new GatewayError('permanent', 'EDGAR_SUSPENDED', 'Suspended: invalid CIK or CIK Confirmation Code');
     }
-    if (a.formType !== '8-K' || items.length === 0) {
-      throw new GatewayError('permanent', 'EDGAR_SUSPENDED', 'Suspended: Form 8-K needs at least one item');
+    if (a.formType === '8-K' ? items.length === 0 : a.formType !== '6-K') {
+      throw new GatewayError('permanent', 'EDGAR_SUSPENDED', 'Suspended: expected Form 8-K with at least one item, or Form 6-K');
     }
     if (items.includes('2.02') && !p.attachments.some((x) => x.type === 'EX-99.1')) {
       throw new GatewayError('permanent', 'EDGAR_SUSPENDED', 'Suspended: Item 2.02 requires Exhibit 99.1');
@@ -175,7 +175,7 @@ export class MockEdgarGateway extends MockGateway {
     return {
       externalRef: accession,
       filingDate,
-      detail: { service: 'EDGAR', accessionNumber: accession, formType: '8-K', status: 'accepted', filingDate },
+      detail: { service: 'EDGAR', accessionNumber: accession, formType: p.attributes.formType, status: 'accepted', filingDate },
     };
   }
 }

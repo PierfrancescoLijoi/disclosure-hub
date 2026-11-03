@@ -103,8 +103,8 @@ function AppShell() {
         <div className="brand">
           <Logo />
           <span>
-            SignalFlow IR
-            <small>Disclosure Hub</small>
+            Disclosure Hub
+            <small>Regulatory announcements</small>
           </span>
         </div>
         <div className="company">

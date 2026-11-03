@@ -123,7 +123,7 @@ and run `AUTH=oidc GATEWAY_LATENCY_MS=200 N=200 CONCURRENCY=5 npm run bench`. Re
 ## Tests
 
 ```bash
-npm test            # 114 server tests (7 need PostgreSQL or Redis and are skipped), SQLite in memory, a few seconds
+npm test            # 124 server tests (7 need PostgreSQL or Redis and are skipped), SQLite in memory, a few seconds
 npm test -w apps/web   # 12 UI logic tests (diff, attention queue, readiness)
 npm run typecheck
 ```
@@ -136,7 +136,7 @@ docker run -d --name hub-test-redis -p 56379:6379 redis:7-alpine
 
 TEST_PG_URL=postgres://hub:hub-dev-only@localhost:55432/hub_test \
 TEST_REDIS_URL=redis://localhost:56379 \
-npm test -w apps/server -- --no-file-parallelism     # 121 tests
+npm test -w apps/server -- --no-file-parallelism     # 131 tests
 ```
 
 With `TEST_PG_URL` every integration test runs on PostgreSQL (the schema is dropped and recreated per
@@ -209,7 +209,7 @@ apps/server/src
   application/    announcement service, publication runner, pre-check
   auth/           OIDC bearer-token verification (Entra ID, Keycloak)
   http/           Fastify routes, auth hook, rate limit, metrics, static web serving
-apps/web          React + Vite single-page app, SignalFlow-style UI (see docs/UI.md): composer, review room, publishing console, public feed; OIDC sign-in
+apps/web          React + Vite single-page app (UI built from the SignalFlow IR product spec, see docs/UI.md): composer, review room, publishing console, public feed; OIDC sign-in
 deploy/keycloak   the local identity provider's realm
 infra/azure       Terraform for the Azure deployment, mocked tests, verify script
 discovery/        requirements work: assumptions, EARS requirements, open questions
@@ -221,5 +221,6 @@ docs/             architecture write-up
 - Vite + React for the UI instead of Next.js: nothing here needs server rendering.
 - `npm start` keeps seeded personas so it runs with nothing installed; Compose and Azure use real OIDC. The company a person acts for is one default per deployment unless the token carries it.
 - Azure Terraform is not applied (no subscription was available); see `infra/azure/README.md` for the checklist the first deploy must run.
+- Regulatory model, in short: the UK PDMR deadline runs from the transaction (MAR Art. 19(3)); inside information is released even when the RNS window is closed; the US issuer profile has a filer status (domestic filers file Form 8-K, foreign private issuers Form 6-K); an 8-K with only Items 7.01 or 8.01 has no deadline; Item 1.05 counts from the materiality determination. What is not modelled (corrections, dual listing, insider lists, closed periods, TR-1, 10-Q/10-K, scheduled release) and what must be verified against a real provider (no idempotency lookup at real RIS or EDGAR, EDGAR Next credentials) is at the end of `discovery/spec.md`.
 - Rule sources are named in code comments next to each rule. Scheduling and embargo, attachments, iXBRL, translations and real newswire connections are out of scope (see the write-up).
 - Full list of assumptions and the questions I would put to the panel: `discovery/ledger.md` and `discovery/questions.md`.

@@ -35,12 +35,16 @@ export interface CategoryDefinition<M = any> {
   rules?: Rule<M>[];
   approval: ApprovalRequirement | ((ctx: RuleContext<M>) => ApprovalRequirement);
   deadline?: (ctx: RuleContext<M>) => Deadline | null;
+  /** Urgent disclosure (e.g. inside information) is never held for the channel's opening hours. */
+  releaseOutsideWindow?: boolean;
 }
 
 export interface Timing {
   deadline: Deadline | null;
   overdue: boolean;
   window: WindowStatus;
+  /** True when a closed window must hold the release; false for urgent categories. */
+  holdWhenClosed: boolean;
 }
 
 export interface JurisdictionInfo {
@@ -117,8 +121,10 @@ export function definePolicy(cfg: PolicyConfig): JurisdictionPolicy {
   };
 
   const timing = (ctx: RuleContext): Timing => {
-    const deadline = category(ctx.category).deadline?.(ctx) ?? null;
+    const def = category(ctx.category);
+    const deadline = def.deadline?.(ctx) ?? null;
     return {
+      holdWhenClosed: !def.releaseOutsideWindow,
       deadline,
       overdue: !!deadline?.at && ctx.now > deadline.at,
       window: windowStatus(ctx.now, cfg.timezone, cfg.window, cfg.calendar),

@@ -38,7 +38,7 @@ export function Login() {
     <div className="login">
       <section className="hero">
         <div className="row" style={{ color: '#fff', fontWeight: 700, gap: 12 }}>
-          <Logo size={36} /> SignalFlow IR
+          <Logo size={36} /> Disclosure Hub
         </div>
         <h1>Regulatory announcements, from draft to published.</h1>
         <ul style={{ color: '#b8c3de', paddingLeft: 18, display: 'grid', gap: 8, maxWidth: '34em' }}>
