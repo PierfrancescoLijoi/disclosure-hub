@@ -24,6 +24,8 @@ import type {
   ValidationReport,
 } from '../domain/types.js';
 import type { Clock, JobQueue, ListQuery, Logger, PublicQuery, Store, StoreTx } from '../ports/index.js';
+import { EVENT } from '../domain/events.js';
+import type { EventBus } from './reactor.js';
 
 export interface ServiceDeps {
   store: Store;
@@ -32,6 +34,7 @@ export interface ServiceDeps {
   queue: JobQueue;
   maxAttempts: number;
   log: Logger;
+  events: EventBus;
 }
 
 export interface DraftInput {
@@ -234,6 +237,7 @@ export class AnnouncementService {
         iso(now),
       );
       await this.audit(tx, actor, a.id, 'submitted', { requirement, contentHash: rev.contentHash, ...summarise(report) }, iso(now));
+      await this.d.events.emit(tx, { type: EVENT.submitted, issuerId: a.issuerId, aggregateId: a.id, payload: { revision: rev.number } }, iso(now));
       return { status: 'in_review', report, ok: true };
     });
   }
@@ -452,6 +456,10 @@ export class AnnouncementService {
   async publicFeed(q: PublicQuery) {
     const { items, nextCursor } = await this.d.store.read.announcements.publicFeed(q);
     return { items: items.map((i) => this.publicLabels(i)), nextCursor };
+  }
+
+  async publicIssuers() {
+    return this.d.store.read.announcements.publicIssuers();
   }
 
   async publicGet(id: string) {

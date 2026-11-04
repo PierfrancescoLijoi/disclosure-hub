@@ -130,6 +130,8 @@ export interface Activity {
 }
 export interface PublicItem {
   id: string;
+  issuerId: string;
+  excerpt: string;
   jurisdiction: string;
   category: string;
   categoryLabel: string;
@@ -141,6 +143,27 @@ export interface PublicItem {
   publishedAt: string;
 }
 export type PublicDetail = PublicItem & { body: string };
+export interface PublicIssuer {
+  id: string;
+  name: string;
+}
+export interface PublicOptions {
+  email: boolean;
+  webhook: boolean;
+  feed: boolean;
+  /** The demo's in-memory mailbox exists (log transport); false when mail goes to a real server. */
+  mailbox: boolean;
+}
+export interface Following {
+  issuer?: string;
+  jurisdiction?: string;
+  category?: string;
+}
+export interface ConfirmedFollowing {
+  kind: 'email' | 'webhook';
+  filters: { issuerId: string | null; jurisdiction: string | null; category: string | null };
+  issuerName: string | null;
+}
 export interface Preview {
   channel: { id: string; name: string };
   payload: { channel: string; headline: string; content: string; attributes: Record<string, string | string[]>; attachments: { type: string; name: string }[] } | null;
@@ -218,5 +241,6 @@ export async function api<T = any>(method: Method, path: string, body?: unknown)
 
 /** Public reading: no identity is sent, none is needed. */
 export const publicApi = <T = any>(path: string) => request<T>('GET', `/public${path}`, undefined, {}).then((r) => r.data);
+export const publicPost = <T = any>(path: string, body: unknown) => request<T>('POST', `/public${path}`, body, {}).then((r) => r.data);
 
 export const errorText = (e: unknown) => (e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));

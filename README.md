@@ -18,6 +18,12 @@ jurisdictions, with one shared workflow and per-jurisdiction rules and delivery.
 The write-up of design, trade-offs, what was cut and what comes next is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Sizing for a small or medium company, with measurements:
 [docs/SIZING.md](docs/SIZING.md). The Azure deployment: [infra/azure/README.md](infra/azure/README.md).
+How to extend it (consumers, agents, channels, jurisdictions): [docs/MODULES.md](docs/MODULES.md).
+
+**For readers, not only staff.** Published announcements are public: an archive filterable by company, category, date and
+text (`/public/announcements`), an Atom feed per filter, and follow-by-email or signed webhook with double opt-in and
+one-click unsubscribe. Everything that follows a workflow step (telling followers, running advisory agents) is a consumer of
+a domain event, so adding another agent or channel does not touch the workflow.
 
 ## One architecture, three ways to run it
 
@@ -26,7 +32,9 @@ The write-up of design, trade-offs, what was cut and what comes next is in
 | Sign-in | Seeded personas (`x-user-id`), demo only | **OIDC**: Keycloak, Authorization Code + PKCE | **OIDC**: Microsoft Entra ID, roles from app roles |
 | Database | SQLite file | PostgreSQL 16 | PostgreSQL Flexible Server, zone-redundant, Entra-only |
 | Queue | In-process | PostgreSQL `LISTEN/NOTIFY` | Same |
-| Processes | One | api, worker x N, migrate job | Container Apps api, worker (2+ each), migrate job |
+| Processes | One | api, worker x N, notifier, agents, migrate job | Container Apps api, worker (2+ each), one app per consumer set, migrate job |
+| Reader mail | In-memory demo mailbox (`/public/mailbox`) | Mailpit (inbox on :8025) | Azure Communication Services Email, managed identity |
+| Public edge | none | nginx cache on `/api/public` | Front Door Standard + WAF rate rule |
 | Secrets | none | demo passwords in the compose file | none stored: managed identities, Key Vault |
 | Status | run and tested | run and tested | **validated offline, not applied** |
 
@@ -55,7 +63,10 @@ docker compose up --build
 
 Open <http://localhost:8080> and sign in (nginx serves the app and proxies `/api`; the API is also on :3000).
 Services: `postgres`, `keycloak` (identity provider, realm imported from `deploy/keycloak`), `migrate` (one-shot),
-`api`, `worker`, `web`. Resource limits match the Azure replicas (see [docs/SIZING.md](docs/SIZING.md)).
+`api`, `worker`, `notifier` and `agents` (`ROLE=events`, each running only its own event consumers), `mailpit`
+(SMTP sink, inbox on <http://localhost:8025>, where subscription confirmations and announcement mail arrive), `web`.
+Follow an announcement on <http://localhost:8080/public/announcements>, open the confirmation in Mailpit, publish as a
+signed-in user, and the notification arrives from the `notifier` process. Resource limits match the Azure replicas (see [docs/SIZING.md](docs/SIZING.md)).
 More publishing capacity is one flag, nothing else changes (two workers is the Azure default):
 
 ```bash
@@ -123,7 +134,7 @@ and run `AUTH=oidc GATEWAY_LATENCY_MS=200 N=200 CONCURRENCY=5 npm run bench`. Re
 ## Tests
 
 ```bash
-npm test            # 124 server tests (7 need PostgreSQL or Redis and are skipped), SQLite in memory, a few seconds
+npm test            # 161 server tests (7 need PostgreSQL or Redis and are skipped), SQLite in memory, a few seconds
 npm test -w apps/web   # 12 UI logic tests (diff, attention queue, readiness)
 npm run typecheck
 ```
@@ -136,7 +147,7 @@ docker run -d --name hub-test-redis -p 56379:6379 redis:7-alpine
 
 TEST_PG_URL=postgres://hub:hub-dev-only@localhost:55432/hub_test \
 TEST_REDIS_URL=redis://localhost:56379 \
-npm test -w apps/server -- --no-file-parallelism     # 131 tests
+npm test -w apps/server -- --no-file-parallelism     # 168 tests
 ```
 
 With `TEST_PG_URL` every integration test runs on PostgreSQL (the schema is dropped and recreated per
@@ -153,6 +164,8 @@ What the tests cover:
 - `operations`: publication windows, adding a third jurisdiction without touching the workflow, AI pre-check safety, an architecture test that fails the build on forbidden imports.
 - `auth`: OIDC bearer tokens against a local JWKS: valid, expired, wrong audience or issuer, forged signature, unknown role, discovery down (503), company from claim.
 - `pgqueue`: the PostgreSQL `LISTEN/NOTIFY` queue on a real database, two workers, and recovery after the listener connection is cut.
+- `events`: the outbox (delivered once, retry with back-off, dead, lease takeover, per-process consumer filter) and agents (autorun, a second agent chained on the first, one report per event, bounded ping-pong, invalid output rejected, a failing agent never blocks the workflow, the agent only gets a copy).
+- `readers`: follow, confirm, notified once (a redelivery does not repeat it), delivery by the chosen filters, unsubscribe erases the address, forged, swapped and expired links, abuse caps, transient retry versus permanent failure, signed webhooks, private-address refusal (including literal IPs), Atom escaping, archive filters and text search. `public-http`: the public routes, feed validators (304), cache headers, the one-click unsubscribe post, the form's rate limit, the demo mailbox. `config`: the reader and role settings are validated.
 - `http`: the same through the REST API, including error-code mapping, idempotent create and the health probes. Tenant isolation (another company gets 404, empty lists) is covered in both `workflow` and `http`.
 
 ## Configuration
@@ -161,7 +174,16 @@ All settings are environment variables, validated at startup (a bad value stops 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ROLE` | `all` | `api`, `worker` or `all` |
+| `ROLE` | `all` | `api`, `worker` (publication queue and sweeper), `events` (the event reactor only) or `all` |
+| `REACTOR_CONSUMERS` | all | comma list of consumer ids this process runs (`notifier`, `agent:precheck`, ...); the processes of a split deployment each name theirs |
+| `REACTOR_POLL_MS`, `REACTOR_MAX_ATTEMPTS` | `1000`, `8` | how often the reactor looks for due events, and attempts before a delivery is `dead` |
+| `AGENTS` | pre-check when `AI_PROVIDER=mock`, else none | agents that run by themselves on events (a real provider costs money per submit) |
+| `PUBLIC_BASE_URL` | `http://localhost:3000` | the site's public address: links in mail and in the feed |
+| `READER_TOKEN_KEY` | demo value in `DEMO=1` | 32+ characters; confirmation, unsubscribe and webhook-signing secrets derive from it; required elsewhere unless readers are off |
+| `EMAIL_TRANSPORT`, `EMAIL_FROM` | `log` in demo, else `off` | `off`, `log` (in-memory demo mailbox), `smtp` (`SMTP_URL`) or `acs` (`ACS_ENDPOINT`, uses the managed identity) |
+| `WEBHOOKS`, `WEBHOOK_ALLOW_PRIVATE` | `1`, `0` | reader webhooks on or off; private addresses and plain http only for a local demo (refused unless `DEMO=1`) |
+| `TRUST_PROXY` | `0` | proxies in front of the API whose `X-Forwarded-For` is trusted, so per-client limits see the reader |
+| `EDGE_ID` | | Azure Front Door id: requests without it in `X-Azure-FDID` get 403 (probes exempt), so the edge's WAF and cache cannot be skipped |
 | `PORT` | `3000` | HTTP port |
 | `DATABASE_URL` | `sqlite:./data/hub.db` | `sqlite:...` or `postgres://...` |
 | `QUEUE_URL` | `inproc` | `inproc`, `pg` (PostgreSQL LISTEN/NOTIFY, needs a PostgreSQL `DATABASE_URL`) or `redis://...`; split roles need `pg` or Redis |
@@ -205,15 +227,15 @@ apps/server/src
   domain/         pure rules: state machine, permissions, hashing, calendar, policy contract
   jurisdictions/  UK and US policies, identifiers, holiday calendars  (the plug-in point)
   ports/          interfaces the application depends on
-  adapters/       db (Kysely: SQLite, Postgres), queue (in-process, Postgres LISTEN/NOTIFY, BullMQ), gateways (mock RNS, EDGAR), ai
-  application/    announcement service, publication runner, pre-check
+  adapters/       db (Kysely: SQLite, Postgres), queue (in-process, Postgres LISTEN/NOTIFY, BullMQ), gateways (mock RNS, EDGAR), ai, channels (email, webhook)
+  application/    announcement service, publication runner, pre-check, event bus and reactor, agents, readers (subscriptions, notifier, feed)
   auth/           OIDC bearer-token verification (Entra ID, Keycloak)
-  http/           Fastify routes, auth hook, rate limit, metrics, static web serving
-apps/web          React + Vite single-page app (UI built from the SignalFlow IR product spec, see docs/UI.md): composer, review room, publishing console, public feed; OIDC sign-in
+  http/           Fastify routes, auth hook, rate limit, metrics, public routes, static web serving
+apps/web          React + Vite single-page app (UI built from the SignalFlow IR product spec, see docs/UI.md): composer, review room, publishing console, public archive with follow, confirm and unsubscribe pages; OIDC sign-in
 deploy/keycloak   the local identity provider's realm
 infra/azure       Terraform for the Azure deployment, mocked tests, verify script
 discovery/        requirements work: assumptions, EARS requirements, open questions
-docs/             architecture write-up
+docs/             architecture write-up, extension guide (MODULES.md), sizing, UI
 ```
 
 ## Assumptions and deviations

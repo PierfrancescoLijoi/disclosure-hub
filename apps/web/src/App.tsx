@@ -6,6 +6,7 @@ import { Detail } from './pages/Detail';
 import { Landing, Login } from './pages/Login';
 import { Overview } from './pages/Overview';
 import { PublicDetail, PublicFeed } from './pages/Public';
+import { PublicConfirm, PublicMailbox, PublicUnsubscribe } from './pages/PublicFollow';
 import { Publishing } from './pages/Publishing';
 import { ReviewInbox, ReviewRoom } from './pages/Review';
 import { Workspace } from './pages/Workspace';
@@ -37,6 +38,9 @@ export function App() {
 
           <Route path="/public/announcements" element={<PublicFeed />} />
           <Route path="/public/announcements/:id" element={<PublicDetail />} />
+          <Route path="/public/confirm" element={<PublicConfirm />} />
+          <Route path="/public/unsubscribe" element={<PublicUnsubscribe />} />
+          <Route path="/public/mailbox" element={<PublicMailbox />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </SessionProvider>

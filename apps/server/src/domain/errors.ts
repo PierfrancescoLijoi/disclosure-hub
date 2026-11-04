@@ -18,3 +18,4 @@ export const conflict = (code: string, message: string, details?: unknown) =>
   new DomainError(409, code, message, details);
 export const unprocessable = (code: string, message: string, details?: unknown) =>
   new DomainError(422, code, message, details);
+export const badRequest = (code: string, message: string) => new DomainError(400, code, message);

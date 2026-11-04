@@ -29,3 +29,6 @@ Domain: `fintech` (primary), `saas-b2b` + `ai-llm` (secondary). Client: Board In
 | L-23 | Real RIS/EDGAR have no idempotency-key lookup; the mock models one | Known limit | Reconciliation design must change against a real provider | Needs vendor access |
 | L-24 | EDGAR Next credential model and per-form cut-offs | Open, to verify | Issuer profile fields (CCC may be legacy) | Check current SEC guidance before a real filing |
 | L-25 | Not modelled: scheduled release, corrections after publication, dual-listing links, insider lists, closed periods, 20,000 euro threshold, TR-1, 10-Q/10-K | Known limits | See the end of spec.md | Roadmap |
+| L-26 | Readers are the public: an archive and follow-by-email or webhook are in scope; investors need no account | Added 03/11 (user: expand the reader side) | FR-15 to FR-17, ASR-19 | Preference centre, digests, Slack |
+| L-27 | Future agents and consumers must be addable without changing the workflow; cloud mirrors the local split | Added 03/11 (user) | Outbox and consumer sets, ASR-16 to ASR-18 | Agents that act; a broker at scale |
+| L-28 | Azure mail through Communication Services with an Azure-managed domain; built-in role is broader than send; endpoint format, hop counts and cache behaviour unproven | Designed, not applied | infra/azure/README.md items 9 to 15 | First deploy |

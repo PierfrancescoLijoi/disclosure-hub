@@ -1,6 +1,6 @@
 output "app_url" {
-  description = "Where people open the platform."
-  value       = local.app_url
+  description = "Where people open the platform: the Front Door address when it is on, else the container app."
+  value       = local.public_base_url
 }
 
 output "resource_group" {

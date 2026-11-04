@@ -18,6 +18,11 @@
 | ASR-13 | Deadlines are computed from category metadata, may be absent (voluntary items) or per item (Item 1.05) | BR-2, BR-4 | Obligation tracking beyond one deadline |
 | ASR-14 | Issuer profile per jurisdiction carries the identifiers and the status the form depends on (US filer status) | BR-9 | Profiles from an admin UI |
 | ASR-15 | Azure Terraform twin of the Compose stack, validated offline, never applied | L-17 | First deploy checklist in infra/azure/README.md |
+| ASR-16 | Domain events through a transactional outbox: one row per event, one delivery per interested consumer, lease-based claim, at-least-once, dead state | FR-12, NFR-10 | Message broker (Service Bus) behind the same consumer port |
+| ASR-17 | Consumers selected per process (`ROLE=events`, `REACTOR_CONSUMERS`); one Container App per consumer set in Azure | FR-13 | Autoscale on outbox lag (needs a metric scaler that works with managed identity) |
+| ASR-18 | Agents are guarded consumers: advisory, validated, once per event, bounded chaining, failure isolated | FR-14 | Agents that propose edits for a human to accept |
+| ASR-19 | Public reads are a separate, cacheable, people-free view; subscriptions use derived tokens, double opt-in, one-click exit, erased on leaving, SSRF-guarded webhooks | FR-15, FR-16, FR-17, NFR-9 | Customer mail domain, preference centre, digest mode |
+| ASR-20 | Mail through the cloud identity (Azure Communication Services, managed identity), SMTP only locally; edge cache and WAF rule at Front Door | NFR-9 | WAF managed rules (Premium), private origin |
 
 ## MVP slice
 Both jurisdictions end to end with tests, then UI, then Compose, then AI. Cut order: AI, UI polish, extra categories.

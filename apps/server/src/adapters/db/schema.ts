@@ -73,7 +73,43 @@ export interface DB {
     prev_hash: string;
     hash: string;
   };
-  ai_reports: { id: string; announcement_id: string; revision: number; provider: string; report: string; at: string };
+  ai_reports: {
+    id: string;
+    announcement_id: string;
+    revision: number;
+    provider: string;
+    report: string;
+    at: string;
+    /** Which agent wrote it; 'precheck' for rows made by the on-demand button. */
+    agent: string;
+    /** The event that triggered the agent: makes a redelivered event write one report. */
+    event_id: string | null;
+  };
+  domain_events: { id: string; type: string; issuer_id: string; aggregate_id: string; payload: string; created_at: string };
+  event_deliveries: {
+    id: string;
+    event_id: string;
+    consumer: string;
+    status: string;
+    attempts: number;
+    next_attempt_at: string;
+    lease_until: string | null;
+    lease_token: string | null;
+    last_error: string | null;
+    updated_at: string;
+  };
+  subscriptions: {
+    id: string;
+    kind: string;
+    target: string;
+    issuer_id: string | null;
+    jurisdiction: string | null;
+    category: string | null;
+    status: string;
+    created_at: string;
+    confirmed_at: string | null;
+  };
+  notifications: { subscription_id: string; announcement_id: string; status: string; attempts: number; last_error: string | null; at: string };
   settings: { key: string; value: string };
   /** The mock newswires' own books: what each "external system" has accepted. */
   ext_receipts: {

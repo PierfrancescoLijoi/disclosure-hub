@@ -38,6 +38,10 @@ Author (IR team), Approver (company secretary, general counsel, CFO), Publisher 
   - US-5.1 As an auditor I list every event for an announcement and verify the hash chain.
 - EP-6 AI pre-check (advisory)
   - US-6.1 As a reviewer I request a pre-check that classifies the announcement, lists missing information and flags possible UK MAR / Reg FD risks, each with evidence and explanation. It never changes status.
+- EP-8 Readers and extension
+  - US-8.1 As a member of the public I search published announcements by company, category, date and text, and open one without signing in.
+  - US-8.2 As an investor I follow a company or a topic by email or webhook, confirm it, and leave with one click from any message.
+  - US-8.3 As a developer I add a notifier, an agent or a channel without changing the publishing workflow.
 - EP-7 Operability
   - US-7.1 `npm install && npm start` runs everything locally; `docker compose up --build` runs Postgres, Redis, api, worker, web.
 
@@ -53,6 +57,12 @@ Author (IR team), Approver (company secretary, general counsel, CFO), Publisher 
 - FR-9 The system shall append an audit event for every state change, publication attempt and AI report, chained by hash per announcement.
 - FR-10 Every query shall filter by issuer (tenant).
 - FR-11 The AI pre-check shall never be a precondition for any transition.
+- FR-12 When a revision is submitted or published, the system shall record a domain event in the same transaction as the change; consumers shall receive it at least once and shall be idempotent.
+- FR-13 The system shall let a process run a chosen subset of event consumers, so consumers can be deployed and scaled separately.
+- FR-14 An agent shall be advisory: it reads a copy of the announcement, stores a validated report once per event, shall not change workflow state, and a chain of agents shall be bounded.
+- FR-15 The public archive shall return only published announcements, with no people, approvals or unpublished text, filterable by company, jurisdiction, category, date range and every word of a text query.
+- FR-16 A subscription shall be confirmed by its owner before anything but the confirmation is sent; the form shall answer the same whether or not an address is known; every message shall carry a one-click unsubscribe; leaving shall erase the address.
+- FR-17 A webhook subscription shall be https, signed with a per-subscription secret, and shall never call a private, loopback, link-local or metadata address (checked at connect time, including literal addresses).
 
 ## Business rules
 - BR-1 (UK) Inside information is disclosed as soon as possible; a delayed disclosure needs a recorded justification (modelled from MAR Art. 17(4)).
@@ -74,6 +84,8 @@ Author (IR team), Approver (company secretary, general counsel, CFO), Publisher 
 - NFR-5 Exactly-once in effect per (announcement, revision): 0 duplicates in the crash/retry test matrix.
 - NFR-6 Audit retained at least 5 years (MAR Art. 17(1) website retention; filing records); tamper evidence verified by chain walk.
 - NFR-7 Gateway protection: concurrency cap per gateway, so a burst cannot exceed vendor limits.
+- NFR-9 Readers: public reads are cacheable for 30 to 60 seconds so a crowd after a big announcement costs the origin one read per lifetime; the subscription form is limited per client (5 an hour at the API, a rate rule at the edge) and an address is capped at 10 subscriptions. Meter: edge cache status, 429 counts.
+- NFR-10 Outbox: a delivery older than 5 minutes alerts; a delivery that used all its attempts (`dead`) alerts; a failing consumer never delays publishing. Meter: oldest pending delivery, dead deliveries (also in /metrics).
 - NFR-8 Code boundary: `domain` imports nothing from adapters/http (checked by test).
 
 ## Integrations

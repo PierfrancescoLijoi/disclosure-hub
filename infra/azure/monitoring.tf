@@ -254,6 +254,99 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "publication_failed" {
   }
 }
 
+# ------------------------------------------------------------------ events and readers
+
+# One alert per consumer set: a set with no replica means its events pile up (readers hear nothing, agents stay silent).
+resource "azurerm_monitor_metric_alert" "events_replicas" {
+  for_each            = var.consumer_sets
+  name                = "${local.name}-${each.key}-replicas-below-minimum"
+  resource_group_name = azurerm_resource_group.main.name
+  scopes              = [azurerm_container_app.events[each.key].id]
+  description         = "The ${each.key} consumers have fewer replicas than their minimum for 15 minutes: their events are waiting."
+  severity            = 2
+  frequency           = "PT1M"
+  window_size         = "PT15M"
+  tags                = local.tags
+
+  criteria {
+    metric_namespace = "Microsoft.App/containerApps"
+    metric_name      = "Replicas"
+    aggregation      = "Minimum"
+    operator         = "LessThan"
+    threshold        = each.value.min_replicas
+  }
+
+  action {
+    action_group_id = local.alert_common.action_group
+  }
+}
+
+# Outbox lag: the event consumers log the oldest waiting delivery every minute (the same numbers as /metrics).
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "outbox_lag" {
+  name                 = "${local.name}-outbox-lag"
+  resource_group_name  = azurerm_resource_group.main.name
+  location             = azurerm_resource_group.main.location
+  scopes               = [azurerm_log_analytics_workspace.main.id]
+  description          = "A domain event has waited more than 5 minutes for its consumer: readers or agents are behind."
+  severity             = 2
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT10M"
+  tags                 = local.tags
+
+  criteria {
+    query                   = <<-KQL
+      ContainerAppConsoleLogs_CL
+      | extend j = parse_json(Log_s)
+      | where tostring(j.msg) == "outbox" and toint(j.oldestPendingSeconds) > 300
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+}
+
+# A delivery that used all its attempts stops retrying and waits for a person (a bad template, a revoked role).
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "dead_delivery" {
+  name                 = "${local.name}-dead-delivery"
+  resource_group_name  = azurerm_resource_group.main.name
+  location             = azurerm_resource_group.main.location
+  scopes               = [azurerm_log_analytics_workspace.main.id]
+  description          = "An event delivery was given up on after its last attempt. Read the error in the log, fix the cause, then reset the row in event_deliveries."
+  severity             = 1
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT5M"
+  tags                 = local.tags
+
+  criteria {
+    query                   = <<-KQL
+      ContainerAppConsoleLogs_CL
+      | extend j = parse_json(Log_s)
+      | where tostring(j.msg) == "event delivery failed" and tobool(j.dead)
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+}
+
 # ------------------------------------------------------------------ budget
 
 resource "azurerm_consumption_budget_resource_group" "main" {

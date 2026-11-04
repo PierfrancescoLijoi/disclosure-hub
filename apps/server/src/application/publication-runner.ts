@@ -13,6 +13,8 @@ import {
 } from '../ports/index.js';
 import type { PolicyRegistry } from '../domain/policy.js';
 import { ruleContext } from './announcements.js';
+import type { EventBus } from './reactor.js';
+import { EVENT } from '../domain/events.js';
 
 export interface RunnerConfig {
   leaseMs: number;
@@ -32,6 +34,7 @@ export interface RunnerDeps {
   queue: JobQueue;
   log: Logger;
   config: RunnerConfig;
+  events: EventBus;
   random?: () => number;
 }
 
@@ -158,6 +161,8 @@ export class PublicationRunner {
         },
         at,
       );
+      // Readers and agents react to this fact; committed with it, so neither can be lost or invented.
+      await this.d.events.emit(tx, { type: EVENT.published, issuerId: a.issuerId, aggregateId: a.id, payload: { revision: claimed.revision } }, at);
       return 'published' as const;
     });
   }

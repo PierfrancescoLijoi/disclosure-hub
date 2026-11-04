@@ -4,6 +4,9 @@
 #   postgres                    PostgreSQL Flexible Server (zone-redundant HA)
 #   keycloak (OIDC)             Microsoft Entra ID (OIDC)
 #   api, worker (+ migrate)     Container Apps: api, worker, migrate job
+#   notifier, agents (events)   Container Apps: one app per consumer set (ROLE=events), scaled on outbox lag
+#   mailpit (SMTP sink)         Azure Communication Services Email (managed identity, no SMTP password)
+#   nginx cache on /api/public  Front Door Standard caching the public routes
 #   web (nginx)                 the API container serves the web app; Azure ingress terminates TLS
 #   password in env (dev only)  managed identity token as the database password, Key Vault for the rest
 #
@@ -35,6 +38,16 @@ x-server-env: &server-env
   AI_PROVIDER: ${AI_PROVIDER:-mock}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}
+  # Readers. Mail goes to Mailpit (http://localhost:8025); Azure sends through ACS Email with the managed identity.
+  PUBLIC_BASE_URL: http://localhost:8080   # links in mail and the feed point at the site, not the API
+  READER_TOKEN_KEY: compose-dev-only-reader-token-key-0123456789   # Azure: Key Vault secret
+  EMAIL_TRANSPORT: smtp
+  SMTP_URL: smtp://mailpit:1025
+  EMAIL_FROM: announcements@disclosure-hub.local
+  WEBHOOKS: "1"
+  WEBHOOK_ALLOW_PRIVATE: ${WEBHOOK_ALLOW_PRIVATE:-0}   # 1 only to try a receiver on your own machine
+  TRUST_PROXY: "1"            # nginx here, Front Door and the ingress in Azure: rate limits see the reader, not the proxy
+  REACTOR_POLL_MS: ${REACTOR_POLL_MS:-1000}
 
 services:
   postgres:
@@ -115,6 +128,41 @@ services:
     deploy:
       resources:
         limits: { cpus: "0.5", memory: 512m }
+
+  # The extension seam: each process below drains the same event outbox but only its own consumers, so a
+  # slow mail server or an expensive model never slows publishing or each other. A future agent is one more
+  # service with its own REACTOR_CONSUMERS; nothing in api or worker changes.
+  notifier:
+    build: .
+    environment:
+      <<: *server-env
+      ROLE: events
+      REACTOR_CONSUMERS: notifier
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mailpit: { condition: service_started }
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 256m }
+
+  agents:
+    build: .
+    environment:
+      <<: *server-env
+      ROLE: events
+      REACTOR_CONSUMERS: agent:precheck
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 256m }
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ["127.0.0.1:8025:8025"]   # inbox UI
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128m }
 
   web:
     build:

@@ -10,6 +10,7 @@ import { createAuthenticator } from '../auth/oidc.js';
 import { DomainError, unauthorized } from '../domain/errors.js';
 import { STATUSES, type Actor } from '../domain/types.js';
 import type { Runtime } from '../runtime.js';
+import { registerPublicRoutes } from './public.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -42,18 +43,19 @@ const chaosBody = z.object({
   latencyMs: z.number().int().min(0).max(10_000).optional(),
 });
 const idParam = z.object({ id: z.string().min(1) });
-const publicQuery = z.object({
-  jurisdiction: z.string().max(10).optional(),
-  q: z.string().trim().max(100).optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
-  cursor: listQuery.shape.cursor,
-});
 const recentQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) });
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
-  const app = Fastify({ logger: rt.config.DEMO ? { level: 'warn' } : { level: 'info' }, bodyLimit: 1_000_000 });
+  // trustProxy: behind Front Door or an ingress the client address is in X-Forwarded-For, and the rate limit keys on it.
+  // The hop numbers the socket peer 0, so N trusted proxies are hops 0..N-1: trusting hop N would let a client pick its own address.
+  // The request serializer drops the query string: unsubscribe and confirm links carry a token there.
+  const logger = {
+    level: rt.config.DEMO ? 'warn' : 'info',
+    serializers: { req: (req: { method: string; url: string; hostname?: string; ip?: string }) => ({ method: req.method, url: req.url.split('?')[0], hostname: req.hostname, remoteAddress: req.ip }) },
+  };
+  const app = Fastify({ logger, bodyLimit: 1_000_000, trustProxy: rt.config.TRUST_PROXY > 0 ? (_address: string, hop: number) => hop < rt.config.TRUST_PROXY : false });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof DomainError) {
@@ -90,12 +92,25 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
     : undefined;
   const seenIdentity = new Map<string, string>(); // actor id -> fingerprint last written to the users table
 
+  // Behind Front Door the app is only reachable through the edge: a direct call would skip its WAF rate rule and cache.
+  if (rt.config.EDGE_ID) {
+    const edgeId = rt.config.EDGE_ID;
+    app.addHook('onRequest', async (req, reply) => {
+      const path = req.url.split('?')[0];
+      if (path === '/healthz' || path === '/readyz') return; // the platform's own probes
+      const given = req.headers['x-azure-fdid'];
+      if (typeof given !== 'string' || given.toLowerCase() !== edgeId.toLowerCase()) {
+        return reply.status(403).send({ error: { code: 'EDGE_ONLY', message: 'Not reachable directly' } });
+      }
+    });
+  }
+
   // Decided on the matched route, not the raw URL: '/%61pi/...' reaches the same handler.
   app.addHook('preHandler', async (req) => {
     const route = req.routeOptions.url ?? '';
     if (!route.startsWith('/api/')) return;
     // Public reading of published announcements and the sign-in configuration need no identity.
-    if (route === '/api/config' || route.startsWith('/api/public/') || (route === '/api/users' && personaMode)) return;
+    if (route === '/api/config' || route.startsWith('/api/public/') || route === '/api/dev/mailbox' || (route === '/api/users' && personaMode)) return;
 
     if (authenticate) {
       const header = req.headers.authorization;
@@ -146,6 +161,9 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
     gauge('hub_publications', 'Publications by status', Object.entries(s.publicationsByStatus).map(([k, v]) => [`{status="${k}"}`, v]));
     gauge('hub_announcements', 'Announcements by status', Object.entries(s.announcementsByStatus).map(([k, v]) => [`{status="${k}"}`, v]));
     gauge('hub_oldest_waiting_publication_seconds', 'Age of the oldest publication waiting for a worker', [['', s.oldestWaitingSeconds]]);
+    gauge('hub_oldest_pending_delivery_seconds', 'Age of the oldest domain-event delivery waiting for a consumer (outbox lag)', [['', s.events.oldestPendingSeconds]]);
+    gauge('hub_pending_deliveries', 'Domain-event deliveries waiting for a consumer', [['', s.events.pendingDeliveries]]);
+    gauge('hub_dead_deliveries', 'Domain-event deliveries that exhausted their attempts and need a person', [['', s.events.deadDeliveries]]);
     return reply.type('text/plain; version=0.0.4').send(`${lines.join('\n')}\n`);
   });
   app.get('/readyz', async () => {
@@ -179,8 +197,7 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
   });
 
   // Public: published announcements only, no people, no approvals, no jurisdiction metadata.
-  app.get('/api/public/announcements', async (req) => rt.announcements.publicFeed(publicQuery.parse(req.query)));
-  app.get('/api/public/announcements/:id', async (req) => rt.announcements.publicGet(idParam.parse(req.params).id));
+  registerPublicRoutes(app, rt);
 
   app.get('/api/activity', async (req) => ({ events: await rt.announcements.activity(req.actor, recentQuery.parse(req.query).limit) }));
   app.get('/api/publications', async (req) => ({ items: await rt.announcements.publications(req.actor, recentQuery.parse(req.query).limit) }));

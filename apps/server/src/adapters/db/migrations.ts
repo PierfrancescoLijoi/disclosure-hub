@@ -159,4 +159,69 @@ export const migrations: Record<string, Migration> = {
       await sql`create index publications_leased on publications (lease_until) where status = 'in_flight'`.execute(db);
     },
   },
+
+  // Events, consumers, readers. The outbox is written in the same transaction as the state
+  // change; deliveries are leased like publications, one row per event and consumer.
+  '003_events_and_readers': {
+    async up(db: Kysely<any>) {
+      await db.schema
+        .createTable('domain_events')
+        .addColumn('id', text, (c) => c.primaryKey())
+        .addColumn('type', text, (c) => c.notNull())
+        .addColumn('issuer_id', text, (c) => c.notNull())
+        .addColumn('aggregate_id', text, (c) => c.notNull())
+        .addColumn('payload', text, (c) => c.notNull())
+        .addColumn('created_at', text, (c) => c.notNull())
+        .execute();
+      await db.schema.createIndex('domain_events_by_aggregate').on('domain_events').columns(['aggregate_id', 'created_at']).execute();
+
+      await db.schema
+        .createTable('event_deliveries')
+        .addColumn('id', text, (c) => c.primaryKey())
+        .addColumn('event_id', text, (c) => c.notNull().references('domain_events.id'))
+        .addColumn('consumer', text, (c) => c.notNull())
+        .addColumn('status', text, (c) => c.notNull())
+        .addColumn('attempts', int, (c) => c.notNull())
+        .addColumn('next_attempt_at', text, (c) => c.notNull())
+        .addColumn('lease_until', text)
+        .addColumn('lease_token', text)
+        .addColumn('last_error', text)
+        .addColumn('updated_at', text, (c) => c.notNull())
+        .addUniqueConstraint('event_deliveries_once', ['event_id', 'consumer'])
+        .execute();
+      await sql`create index event_deliveries_waiting on event_deliveries (consumer, next_attempt_at) where status = 'pending'`.execute(db);
+      await sql`create index event_deliveries_leased on event_deliveries (lease_until) where status = 'in_flight'`.execute(db);
+
+      await db.schema
+        .createTable('subscriptions')
+        .addColumn('id', text, (c) => c.primaryKey())
+        .addColumn('kind', text, (c) => c.notNull())
+        .addColumn('target', text, (c) => c.notNull())
+        .addColumn('issuer_id', text)
+        .addColumn('jurisdiction', text)
+        .addColumn('category', text)
+        .addColumn('status', text, (c) => c.notNull())
+        .addColumn('created_at', text, (c) => c.notNull())
+        .addColumn('confirmed_at', text)
+        .execute();
+      await sql`create index subscriptions_active on subscriptions (issuer_id, jurisdiction, category) where status = 'active'`.execute(db);
+      await db.schema.createIndex('subscriptions_by_target').on('subscriptions').columns(['kind', 'target']).execute();
+
+      await db.schema
+        .createTable('notifications')
+        .addColumn('subscription_id', text, (c) => c.notNull().references('subscriptions.id'))
+        .addColumn('announcement_id', text, (c) => c.notNull())
+        .addColumn('status', text, (c) => c.notNull())
+        .addColumn('attempts', int, (c) => c.notNull())
+        .addColumn('last_error', text)
+        .addColumn('at', text, (c) => c.notNull())
+        .addPrimaryKeyConstraint('notifications_pk', ['subscription_id', 'announcement_id'])
+        .execute();
+
+      // Every agent writes its advisory report here; the pre-check was the first one.
+      await db.schema.alterTable('ai_reports').addColumn('agent', text, (c) => c.notNull().defaultTo('precheck')).execute();
+      await db.schema.alterTable('ai_reports').addColumn('event_id', text).execute();
+      await sql`create unique index ai_reports_once_per_event on ai_reports (agent, event_id) where event_id is not null`.execute(db);
+    },
+  },
 };

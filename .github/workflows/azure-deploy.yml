@@ -75,10 +75,11 @@ jobs:
           done
           echo "migration did not finish in 10 minutes"; exit 1
 
-      - name: Roll out api and worker (new revision replaces the old one only when it is ready)
+      - name: Roll out every container app (api, worker and each event consumer set; a new revision replaces the old one only when it is ready)
         run: |
-          for APP in api worker; do
-            az containerapp update -g "$RESOURCE_GROUP" -n "ca-${WORKLOAD}-${{ inputs.environment }}-$APP" --image "${{ steps.image.outputs.ref }}"
+          # Every container app in the resource group runs this image; the migrate job is a different resource type.
+          for APP in $(az containerapp list -g "$RESOURCE_GROUP" --query "[].name" -o tsv); do
+            az containerapp update -g "$RESOURCE_GROUP" -n "$APP" --image "${{ steps.image.outputs.ref }}"
           done
 
       - name: Smoke test

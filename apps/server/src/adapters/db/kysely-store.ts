@@ -13,11 +13,15 @@ import type {
   Status,
   ValidationReport,
 } from '../../domain/types.js';
-import type { PublicItem, Store, StoreTx } from '../../ports/index.js';
+import type { AiReportRecord, PublicItem, Store, StoreTx } from '../../ports/index.js';
+import { buildEventsStore } from './event-store.js';
+import { buildNotificationsStore, buildSubscriptionsStore } from './reader-store.js';
 import type { DB } from './schema.js';
 
 type Row<T extends keyof DB> = Selectable<DB[T]>;
 const json = <T>(s: string): T => JSON.parse(s) as T;
+
+const MAX_SEARCH_WORDS = 5;
 
 function isUniqueViolation(e: unknown): boolean {
   const err = e as { code?: string; message?: string };
@@ -112,6 +116,7 @@ const publishedQuery = (db: Kysely<DB>) =>
     .innerJoin('issuers', 'issuers.id', 'announcements.issuer_id')
     .select([
       'announcements.id',
+      'announcements.issuer_id',
       'announcements.jurisdiction',
       'announcements.category',
       'revisions.headline',
@@ -127,18 +132,22 @@ const publishedQuery = (db: Kysely<DB>) =>
 
 const toPublicItem = (r: {
   id: string;
+  issuer_id: string;
   jurisdiction: string;
   category: string;
   headline: string;
+  body: string;
   issuer_name: string;
   external_ref: string | null;
   ack: string | null;
   published_at: string;
 }): PublicItem => ({
   id: r.id,
+  issuerId: r.issuer_id,
   jurisdiction: r.jurisdiction,
   category: r.category,
   headline: r.headline,
+  excerpt: r.body.replace(/\s+/g, ' ').trim().slice(0, 300),
   issuerName: r.issuer_name,
   receipt: r.external_ref ?? '',
   filingDate: r.ack ? (json<{ filingDate?: string }>(r.ack).filingDate ?? null) : null,
@@ -270,11 +279,17 @@ function buildTx(db: Kysely<DB>): StoreTx {
 
       async publicFeed(q) {
         let query = publishedQuery(db);
+        if (q.issuerId) query = query.where('announcements.issuer_id', '=', q.issuerId);
         if (q.jurisdiction) query = query.where('announcements.jurisdiction', '=', q.jurisdiction);
-        if (q.q) {
-          const like = '%' + q.q.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+        if (q.category) query = query.where('announcements.category', '=', q.category);
+        if (q.from) query = query.where('publications.updated_at', '>=', `${q.from}T00:00:00.000Z`);
+        if (q.to) query = query.where('publications.updated_at', '<=', `${q.to}T23:59:59.999Z`);
+        // Every word must appear in the headline, the body or the company name.
+        // Capped: every word is a scan of every body, and a varied query defeats the cache.
+        for (const word of (q.q ?? '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, MAX_SEARCH_WORDS)) {
+          const like = '%' + word.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
           query = query.where(
-            sql<boolean>`(lower(revisions.headline) like ${like} escape '\\' or lower(issuers.name) like ${like} escape '\\')`,
+            sql<boolean>`(lower(revisions.headline) like ${like} escape '\\' or lower(revisions.body) like ${like} escape '\\' or lower(issuers.name) like ${like} escape '\\')`,
           );
         }
         if (q.cursor) {
@@ -294,6 +309,11 @@ function buildTx(db: Kysely<DB>): StoreTx {
           items: page.map(toPublicItem),
           nextCursor: rows.length > q.limit && last ? Buffer.from(`${last.published_at}|${last.id}`).toString('base64url') : null,
         };
+      },
+
+      async publicIssuers() {
+        const rows = await publishedQuery(db).clearSelect().select(['issuers.id as id', 'issuers.name as name']).groupBy(['issuers.id', 'issuers.name']).orderBy('issuers.name').execute();
+        return rows.map((r) => ({ id: r.id, name: r.name }));
       },
 
       async publicGet(id) {
@@ -649,20 +669,35 @@ function buildTx(db: Kysely<DB>): StoreTx {
             provider: r.provider,
             report: JSON.stringify(r.report),
             at: r.at,
+            agent: r.agent,
+            event_id: r.eventId,
           })
           .execute();
       },
-      async latest(announcementId) {
+      async latest(announcementId, agent = 'precheck') {
         const r = await db
           .selectFrom('ai_reports')
           .selectAll()
           .where('announcement_id', '=', announcementId)
+          .where('agent', '=', agent)
           .orderBy('at', 'desc')
           .limit(1)
           .executeTakeFirst();
-        return r
-          ? { id: r.id, announcementId: r.announcement_id, revision: r.revision, provider: r.provider, report: json(r.report), at: r.at }
-          : null;
+        return r ? toAiReport(r) : null;
+      },
+      async forEvent(agent, eventId) {
+        const r = await db.selectFrom('ai_reports').selectAll().where('agent', '=', agent).where('event_id', '=', eventId).executeTakeFirst();
+        return r ? toAiReport(r) : null;
+      },
+      async forRevision(announcementId, revision) {
+        const rows = await db
+          .selectFrom('ai_reports')
+          .selectAll()
+          .where('announcement_id', '=', announcementId)
+          .where('revision', '=', revision)
+          .orderBy('at')
+          .execute();
+        return rows.map(toAiReport);
       },
     },
 
@@ -679,9 +714,24 @@ function buildTx(db: Kysely<DB>): StoreTx {
           .execute();
       },
     },
+
+    events: buildEventsStore(db),
+    subscriptions: buildSubscriptionsStore(db),
+    notifications: buildNotificationsStore(db),
   };
   return tx;
 }
+
+const toAiReport = (r: Row<'ai_reports'>): AiReportRecord => ({
+  id: r.id,
+  announcementId: r.announcement_id,
+  revision: r.revision,
+  provider: r.provider,
+  report: json(r.report),
+  at: r.at,
+  agent: r.agent,
+  eventId: r.event_id,
+});
 
 const toActor = (r: Row<'users'>): Actor => ({ id: r.id, name: r.name, issuerId: r.issuer_id, roles: json(r.roles) });
 const toIssuer = (r: Row<'issuers'>): Issuer => ({ id: r.id, name: r.name, profiles: json(r.profiles) });
@@ -701,10 +751,23 @@ export function createStore(db: Kysely<DB>): Store {
         .select((eb) => eb.fn.min('next_attempt_at').as('at'))
         .where('status', 'in', ['pending', 'retry'])
         .executeTakeFirst();
+      const deliveries = await db.selectFrom('event_deliveries').select(['status', (eb) => eb.fn.countAll<string>().as('n')]).groupBy('status').execute();
+      const byStatus = Object.fromEntries(deliveries.map((r) => [r.status, Number(r.n)]));
+      const oldestDelivery = await db
+        .selectFrom('event_deliveries')
+        .select((eb) => eb.fn.min('next_attempt_at').as('at'))
+        .where('status', '=', 'pending')
+        .where('next_attempt_at', '<=', now)
+        .executeTakeFirst();
       return {
         publicationsByStatus: await count('publications'),
         announcementsByStatus: await count('announcements'),
         oldestWaitingSeconds: oldest?.at ? Math.max(0, (Date.parse(now) - Date.parse(oldest.at as string)) / 1000) : 0,
+        events: {
+          pendingDeliveries: byStatus.pending ?? 0,
+          deadDeliveries: byStatus.dead ?? 0,
+          oldestPendingSeconds: oldestDelivery?.at ? Math.max(0, (Date.parse(now) - Date.parse(oldestDelivery.at as string)) / 1000) : 0,
+        },
       };
     },
   };

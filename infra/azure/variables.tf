@@ -236,3 +236,75 @@ variable "anthropic_secret_name" {
   type        = string
   default     = "anthropic-api-key"
 }
+
+# ------------------------------------------------------------------ events, agents and readers
+
+variable "consumer_sets" {
+  description = <<-EOT
+    One Container App per set of event consumers (the local twin's notifier and agents services). Adding a
+    future agent or consumer is one more entry here: consumers is the REACTOR_CONSUMERS list of that process
+    (a consumer id such as notifier or agent:<id>), agents lists the agents it auto-runs. The union of every
+    set's agents becomes AGENTS in all processes (the one that writes an event decides who gets it), so the
+    api and worker pick it up from the same entry; nothing else changes. The default runs the pre-check on every
+    submit: with ai_provider = "anthropic" that costs a model call each time, so drop `agents` from that entry
+    to keep it on demand only. Replicas are safe at any count (deliveries are leased); the maximum is
+    capped because every process holds database connections (pool of 3 each).
+  EOT
+  type = map(object({
+    consumers    = string
+    agents       = optional(string)
+    min_replicas = optional(number, 1)
+    max_replicas = optional(number, 2)
+    cpu          = optional(number, 0.25)
+    memory       = optional(string, "0.5Gi")
+  }))
+  default = {
+    notifier = { consumers = "notifier" }
+    agents   = { consumers = "agent:precheck", agents = "precheck" }
+  }
+
+  validation {
+    condition     = alltrue([for k, s in var.consumer_sets : can(regex("^[a-z][a-z0-9-]{1,11}$", k)) && length(trimspace(s.consumers)) > 0 && s.min_replicas >= 1 && s.max_replicas >= s.min_replicas])
+    error_message = "consumer_sets: names are 2-12 lowercase letters, digits or hyphens; consumers must name at least one consumer (an empty list would run every consumer in every set); min_replicas is at least 1 (there is no event to wake a scaled-to-zero poller) and at most max_replicas."
+  }
+
+  validation {
+    condition     = sum([for s in var.consumer_sets : s.max_replicas]) <= 6
+    error_message = "consumer_sets: at most 6 replicas in total, which is what the database connection budget leaves after the api and workers (docs/SIZING.md)."
+  }
+}
+
+variable "enable_reader_email" {
+  description = "Create Azure Communication Services Email (Azure-managed sender domain) and let the app identity send through it. false sets EMAIL_TRANSPORT=off: the public form then offers webhooks only."
+  type        = bool
+  default     = true
+}
+
+variable "communication_data_location" {
+  description = "Where Communication Services stores its data. Must be a geography, not a region (Europe, UK, United States...)."
+  type        = string
+  default     = "Europe"
+}
+
+variable "reader_token_secret_name" {
+  description = "Key Vault secret (32+ random characters, created out of band like the provider key) from which confirmation, unsubscribe and webhook-signing secrets are derived. Rotating it invalidates unsubscribe links already sent."
+  type        = string
+  default     = "reader-token-key"
+}
+
+variable "enable_front_door" {
+  description = "Azure Front Door Standard in front of the API: caches the public reads (the archive and the Atom feed), applies a rate limit to the subscription form at the edge. false serves the container app ingress directly."
+  type        = bool
+  default     = true
+}
+
+variable "edge_subscribe_rate_limit_per_minute" {
+  description = "Subscription form posts allowed per client address per minute at the Front Door edge (the API also limits, 5 an hour per client)."
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.edge_subscribe_rate_limit_per_minute >= 1
+    error_message = "edge_subscribe_rate_limit_per_minute must be at least 1."
+  }
+}

@@ -14,3 +14,14 @@ role_groups = {
   cfo               = "00000000-0000-0000-0000-000000000004"
   publisher         = "00000000-0000-0000-0000-000000000005"
 }
+
+# Readers, events and the edge (all optional; these are the defaults)
+# enable_reader_email                  = true        # Azure Communication Services Email; false = webhooks only
+# enable_front_door                    = true        # cache public reads, rate-limit the subscription form
+# edge_subscribe_rate_limit_per_minute = 20
+# communication_data_location          = "Europe"
+# reader_token_secret_name             = "reader-token-key"   # Key Vault secret, created out of band
+# consumer_sets = {                                   # one Container App each; add an agent = add an entry
+#   notifier = { consumers = "notifier" }
+#   agents   = { consumers = "agent:precheck", agents = "precheck" }
+# }

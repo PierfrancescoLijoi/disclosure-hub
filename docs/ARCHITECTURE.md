@@ -7,7 +7,7 @@ legal advice; both newswires are mocks.
 ## 1. Shape
 
 A modular monolith with hexagonal boundaries, in TypeScript end to end. One codebase, one image;
-`ROLE=api | worker | all` decides what a process does.
+`ROLE=api | worker | events | all` decides what a process does.
 
 ```
 React SPA ──REST (Zod)──▶ http (OIDC bearer tokens) ──▶ application ──▶ domain (pure)
@@ -18,6 +18,8 @@ React SPA ──REST (Zod)──▶ http (OIDC bearer tokens) ──▶ applicat
                                                          queue (in-process | Postgres LISTEN/NOTIFY | BullMQ/Redis)
                                                          gateways (mock RNS | mock EDGAR)
                                                          ai (mock | Anthropic)
+                                                         channels (log | SMTP | Azure email | webhook)
+                                  events: outbox ──▶ consumers (notifier, agents, ...), see MODULES.md
 ```
 
 An architecture test fails the build if `domain` imports anything outside itself, if `jurisdictions`
@@ -90,6 +92,18 @@ quoted evidence for each. It is a separate table and a separate port, so it cann
 - The Anthropic provider sends the announcement as quoted data with a system prompt that tells the model not to follow instructions inside it (prompt-injection guard). Provider failure returns an error for the pre-check only.
 - Default is a deterministic mock, so tests and the demo need no key or network. `AI_PROVIDER=off` hides the feature; a test runs the whole workflow with it off.
 
+### 2.6 Everything that follows a workflow step is an event consumer
+
+Submitting and publishing (and agent reports) write a **domain event** in the same transaction as the change: an outbox, `domain_events` plus one `event_deliveries` row per interested consumer. A **reactor** claims deliveries with a lease, calls the consumer, retries with back-off and marks the rest `dead` for a person. The workflow never calls a consumer, so a slow mail service or a failing agent cannot block it, and a new consumer is registered, not wired in. Delivery is at-least-once; consumers are idempotent.
+
+Three things use it today, and it is the answer to "what if we add more agents":
+
+- **Readers.** A public archive with company, category, date and full-text filters, an Atom feed with validators, and subscriptions by email or signed webhook (double opt-in, one-click unsubscribe, address erased on leaving, SSRF-guarded, rate limited, same answer whether or not an address is known). The **notifier** consumer tells followers once per announcement.
+- **Agents.** A consumer with guardrails: advisory (no handle on the workflow), validated output, one report per event, bounded chaining (`MAX_AGENT_CHAIN`), failure isolated. The pre-check is the first; a second agent is one registration.
+- **Process split.** `ROLE=events` runs only the reactor and `REACTOR_CONSUMERS` picks consumers, so the notifier and the agents run as separate processes locally and as separate Container Apps in Azure (`consumer_sets`).
+
+How to extend it, and the decisions behind it: [MODULES.md](MODULES.md).
+
 ## 3. Trade-offs I accepted
 
 | Choice | Gain | Cost |
@@ -100,6 +114,7 @@ quoted evidence for each. It is a separate table and a separate port, so it cann
 | Hash chain per announcement | Cheap, local, verifiable | Does not stop a privileged actor rewriting history (needs external anchoring) |
 | OIDC bearer tokens, roles from the token | Works unchanged with Entra ID and Keycloak; no passwords stored; MFA and Conditional Access stay the company's policy | A deployment serves one default company unless the token carries one; no per-role step-up for publish yet. `npm start` still has persona auth, enabled only in demo mode |
 | PostgreSQL `LISTEN/NOTIFY` as the queue in the small-company topology | No Redis to run, patch or pay for; the row is the truth anyway | Every worker is woken by every notification, so keep workers few (hard limit 6); a notification during a listener outage is lost and the sweeper recovers it |
+| Outbox in the same database, polled | A published announcement and its notifications cannot diverge; no broker to run | A second of latency; a table to prune; a few hundred events a second before a broker is worth it |
 | Mock newswires with chaos modes | Failure paths are demonstrable and tested | Real RNS/EDGAR semantics (rejections, fee, test filings) are unknown until integrated |
 | Vite + React, not Next.js | Smaller, no server rendering needed | A deviation from the brief's example stack |
 
@@ -140,6 +155,9 @@ Next steps for real scale: partitioning or archiving the audit table, a connecti
 | Component | Local | Azure |
 |---|---|---|
 | Identity | Keycloak, PKCE for the browser, bearer tokens for scripts | Entra ID: two app registrations (API with five app roles, browser app as a PKCE-only public client), `app_role_assignment_required`, roles from groups |
+| Event consumers | `notifier` and `agents` services (`ROLE=events`, own `REACTOR_CONSUMERS`) | one Container App per `consumer_sets` entry, one replica minimum, alerts on lag and dead deliveries |
+| Reader mail | Mailpit (SMTP sink, inbox on :8025) | Azure Communication Services Email with the managed identity, no SMTP password |
+| Public edge | nginx cache on `/api/public` | Front Door Standard: cache of public reads, WAF rate rule on the subscription form |
 | API, worker | containers, `--scale worker=2` | Container Apps in a zone-redundant environment, 2 to 4 API and 2 to 3 worker replicas, health probes, scale on concurrent requests |
 | Schema | `migrate` one-shot | a Container Apps job run by the pipeline before each rollout, under a *different* identity from the runtime (the runtime cannot alter tables; the audit table is append-only for it) |
 | Database | PostgreSQL 16 | Flexible Server, zone-redundant HA, delegated subnet, no public endpoint, Entra authentication only, 14-day PITR, geo-redundant backup, locked against deletion |
@@ -147,9 +165,9 @@ Next steps for real scale: partitioning or archiving the audit table, a connecti
 | Queue | `LISTEN/NOTIFY` | same; direct port 5432, not the built-in pooler |
 | Network | one compose network | VNet, a /23 for the containers (443 in), a /28 for the database that admits only that subnet |
 | Delivery | `docker compose up --build` | GitHub Actions with a federated credential, image promoted by digest, migrate, roll out, smoke test (written, not run) |
-| Operations | `/metrics`, logs | Log Analytics, 8 alerts (replicas below floor, restarts, 5xx, database CPU, storage, connections, a failed publication), budget |
+| Operations | `/metrics`, logs | Log Analytics, 8 alerts (replicas below floor, restarts, 5xx, database CPU, storage, connections, a failed publication) plus a replica alert per consumer set, outbox lag and dead deliveries, budget |
 
-What is verified offline and what is not is in [infra/azure/README.md](../infra/azure/README.md): `validate` against the real provider schemas, 15 mocked-provider tests of the security and resilience properties, tflint, trivy and checkov all pass; **nothing was applied**, so Azure's acceptance of the configuration, the Entra token claims, the managed-identity database login and the alert metric names are unproven, each with a named check for the first deploy. Not included on purpose: Front Door and WAF, private endpoints for the registry and vault, an egress firewall, a second region, tracing.
+What is verified offline and what is not is in [infra/azure/README.md](../infra/azure/README.md): `validate` against the real provider schemas, 24 mocked-provider tests of the security and resilience properties, tflint, trivy and checkov all pass; **nothing was applied**, so Azure's acceptance of the configuration, the Entra token claims, the managed-identity database login and the alert metric names are unproven, each with a named check for the first deploy. Also unproven: mail through the managed identity, Front Door caching and the proxy hop count behind it, the consumer-set alerts. Not included on purpose: WAF managed rules (Premium), private endpoints for the registry and vault, an egress firewall, a second region, tracing, a message broker.
 
 ## 5. What was cut, and why
 
@@ -162,7 +180,7 @@ Cut in this order, to protect the end-to-end flow, test quality and publish reli
 - **Translations / multilingual notices, additional categories** (UK: more DTR items; US: more 8-K items).
 - **Regulatory scope a compliance expert will ask about** (full list at the end of discovery/spec.md): corrections and supplements after publication (published is terminal), links between the two announcements of a dual-listed issuer, insider lists (MAR Art. 18), PDMR closed periods and the 20,000 euro threshold, major-holdings notifications (DTR 5, TR-1), Forms 10-Q and 10-K, Section 16 forms, a timed duty for an intentional Reg FD disclosure.
 - **Provider facts to verify before a real filing.** Real RIS and EDGAR offer no idempotency-key lookup, so the "find before resubmit" step needs a different design there (search by headline, time and issuer, or the provider's history). EDGAR Next changed access and the CIK Confirmation Code may be legacy. The 17:30 ET cut-off is the 8-K rule; other forms differ.
-- **Notifications** (email/Slack to approvers), **reporting** and search.
+- **Notifications to approvers** (reader notifications exist, see 2.6; telling reviewers they have work is not built), **reporting**, and agents that act rather than advise.
 - **Distributed tracing.** Structured logs and a metrics endpoint exist; no OpenTelemetry traces across api, queue and worker.
 
 ## 6. Verified, and only designed
@@ -171,17 +189,19 @@ Verified by running it:
 
 - Draft to published in UK and US through the UI, the REST demo and the tests.
 - Retry with backoff, exhaustion and manual retry, permanent rejection, lost acknowledgement (reconciled), lease takeover after a crash, lost wake-up recovery by the sweeper.
-- Same suite on SQLite (124 tests, 7 skipped) and on PostgreSQL + Redis (131 tests, including two workers), plus 12 UI logic tests. The screens are described in docs/UI.md.
+- Same suite on SQLite (161 tests, 7 skipped) and on PostgreSQL + Redis (168 tests, including two workers), plus 12 UI logic tests. The screens are described in docs/UI.md.
 - Real authentication: tokens verified against a JWKS (valid, expired, wrong audience or issuer, forged, unknown role, provider down), and sign-in with Authorization Code + PKCE through a real browser against Keycloak.
 - The PostgreSQL queue on a real database, with two workers and after the listener connection is cut.
 - The Compose twin (Keycloak, PostgreSQL queue, migrate job, 2 workers) with the demo and a benchmark using real tokens.
 - An independent code review and security review of the final code. Fixed from them: authentication decided on the matched route (an encoded path such as `/%61pi/...` skipped it), persona auth refused when `DEMO=0`, malformed list cursor now 400, approval bound to the reviewed revision, publish race now 409, gateway timeout and crash-after-claim handling, Compose ports on localhost.
 - The `docker compose up --build` stack (migrate, api, worker, web) with the demo run through nginx, and with three workers.
+- The event outbox, notifier and agents as separate processes in the Compose twin: follow, confirm, publish, the mail arrives in Mailpit with the one-click unsubscribe headers, the `agents` process stores the pre-check report, repeated public reads hit the nginx cache. Found and fixed on the way: an events process exited at once because its poller did not keep it alive; a webhook to a literal private IP bypassed the DNS guard (Node skips the lookup for IP literals); excerpts lost the letter s (a regex missing its backslash); the demo mailbox demanded a sign-in; the provider schema rejected a Front Door compression type.
+- The reader screens (archive filters, follow, confirm, unsubscribe, demo mailbox) in a browser at desktop and phone width.
 - Typecheck for server and web.
 
 Not verified, or only designed:
 
-- **Everything on Azure.** The Terraform passes validate, tflint, trivy, checkov and 15 mocked tests; it was never applied. Unproven until the first deploy: Entra app roles in the token, the managed-identity database login, `LISTEN/NOTIFY` through the managed server, the container subnet and NSG, the alert metric names, the deploy workflow, failover and restore times.
+- **Everything on Azure.** The Terraform passes validate, tflint, trivy, checkov and 24 mocked tests; it was never applied. Unproven until the first deploy: Entra app roles in the token, the managed-identity database login, `LISTEN/NOTIFY` through the managed server, the container subnet and NSG, the alert metric names, the deploy workflow, failover and restore times.
 - Performance on Azure (the measurements are a laptop under Azure-sized limits).
 
 - The Anthropic provider against the live API (the request/response shape is tested against a stubbed `fetch`).

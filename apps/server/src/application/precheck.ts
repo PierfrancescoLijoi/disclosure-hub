@@ -97,7 +97,7 @@ export class PreCheckService {
     }
 
     const at = clock.now().toISOString();
-    const record: AiReportRecord = { id: randomUUID(), announcementId: a.id, revision: rev.number, provider: provider.name, report: parsed.data, at };
+    const record: AiReportRecord = { id: randomUUID(), announcementId: a.id, revision: rev.number, provider: provider.name, report: parsed.data, at, agent: 'precheck', eventId: null };
     await store.tx(async (tx) => {
       await tx.aiReports.insert(record);
       await tx.audit.append(

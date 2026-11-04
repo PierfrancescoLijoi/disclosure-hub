@@ -20,8 +20,13 @@ locals {
     PG_POOL_MAX         = "5"
     AI_PROVIDER         = var.ai_provider
     NODE_ENV            = "production"
+    # Who gets an event is decided by the process that writes it, so every process must know the same agents,
+    # not only the consumer set that runs them: otherwise the api never creates a delivery for the agent.
+    # "none" is a placeholder: an unset or empty value would fall back to the provider default.
+    AGENTS = local.auto_agents == "" ? "none" : local.auto_agents
   }
 
+  auto_agents      = join(",", distinct(flatten([for s in var.consumer_sets : s.agents == null ? [] : [for a in split(",", s.agents) : trimspace(a)]])))
   anthropic_secret = var.ai_provider == "anthropic"
 }
 
@@ -74,6 +79,12 @@ resource "azurerm_container_app" "api" {
     }
   }
 
+  secret {
+    name                = local.reader_token_secret.name
+    key_vault_secret_id = local.reader_token_secret.key_vault_secret_id
+    identity            = local.reader_token_secret.identity
+  }
+
   ingress {
     external_enabled           = true
     target_port                = 3000
@@ -104,11 +115,24 @@ resource "azurerm_container_app" "api" {
       memory = "1Gi"
 
       dynamic "env" {
-        for_each = merge(local.common_env, { ROLE = "api", DATABASE_URL = local.database_url.app, AZURE_CLIENT_ID = azurerm_user_assigned_identity.app.client_id })
+        for_each = merge(local.common_env, local.reader_env, {
+          ROLE            = "api"
+          DATABASE_URL    = local.database_url.app
+          AZURE_CLIENT_ID = azurerm_user_assigned_identity.app.client_id
+          # Proxies in front of the app whose X-Forwarded-For entries are trusted, so per-client limits see the
+          # reader: Front Door then the Container Apps ingress, or the ingress alone. Counted from the docs, not
+          # observed: the first deploy checks it (README, "First apply").
+          TRUST_PROXY = var.enable_front_door ? "2" : "1"
+        }, var.enable_front_door ? { EDGE_ID = azurerm_cdn_frontdoor_profile.main[0].resource_guid } : {})
         content {
           name  = env.key
           value = env.value
         }
+      }
+
+      env {
+        name        = "READER_TOKEN_KEY"
+        secret_name = local.reader_token_secret.name
       }
 
       dynamic "env" {

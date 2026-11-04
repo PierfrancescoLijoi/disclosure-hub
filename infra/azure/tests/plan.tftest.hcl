@@ -77,6 +77,49 @@ mock_provider "azurerm" {
       id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.App/containerApps/ca-dhub-test-api"
     }
   }
+  mock_resource "azurerm_cdn_frontdoor_profile" {
+    defaults = {
+      id            = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Cdn/profiles/afd-dhub-test"
+      resource_guid = "11111111-aaaa-bbbb-cccc-dddddddddddd"
+    }
+  }
+  mock_resource "azurerm_cdn_frontdoor_endpoint" {
+    defaults = {
+      id        = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Cdn/profiles/afd-dhub-test/afdEndpoints/fde-dhubtest"
+      host_name = "fde-dhubtest.z01.azurefd.net"
+    }
+  }
+  mock_resource "azurerm_cdn_frontdoor_origin_group" {
+    defaults = {
+      id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Cdn/profiles/afd-dhub-test/originGroups/api"
+    }
+  }
+  mock_resource "azurerm_cdn_frontdoor_origin" {
+    defaults = {
+      id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Cdn/profiles/afd-dhub-test/originGroups/api/origins/api"
+    }
+  }
+  mock_resource "azurerm_cdn_frontdoor_firewall_policy" {
+    defaults = {
+      id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Network/frontDoorWebApplicationFirewallPolicies/afdwafdhubtest"
+    }
+  }
+  mock_resource "azurerm_email_communication_service" {
+    defaults = {
+      id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Communication/emailServices/acs-email-dhub-test"
+    }
+  }
+  mock_resource "azurerm_email_communication_service_domain" {
+    defaults = {
+      id                      = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Communication/emailServices/acs-email-dhub-test/domains/AzureManagedDomain"
+      mail_from_sender_domain = "0a1b2c3d.azurecomm.net"
+    }
+  }
+  mock_resource "azurerm_communication_service" {
+    defaults = {
+      id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Communication/communicationServices/acs-dhub-test"
+    }
+  }
   mock_resource "azurerm_monitor_action_group" {
     defaults = {
       id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Insights/actionGroups/ag-dhub-test-ops"
@@ -191,8 +234,8 @@ run "workloads_have_no_stored_credentials" {
     error_message = "The vault firewall must deny by default."
   }
   assert {
-    condition     = !anytrue([for e in azurerm_container_app.api.template[0].container[0].env : can(regex("PASSWORD|SECRET|KEY", e.name))])
-    error_message = "No password, secret or key may be an environment variable of the API with the default provider."
+    condition     = !anytrue([for e in azurerm_container_app.api.template[0].container[0].env : e.value != null && can(regex("PASSWORD|SECRET|KEY", e.name))])
+    error_message = "No password, secret or key may be a plain environment value of the API (a reference to a vault secret is fine)."
   }
   assert {
     condition     = !anytrue([for e in azurerm_container_app_job.migrate.template[0].container[0].env : can(regex("PASSWORD|SECRET|KEY", e.name))])
@@ -302,7 +345,7 @@ run "anthropic_key_comes_from_the_vault" {
   }
 
   assert {
-    condition     = one(azurerm_container_app.api.secret).key_vault_secret_id != null && length(azurerm_container_app.api.secret) == 1
+    condition     = alltrue([for s in azurerm_container_app.api.secret : s.key_vault_secret_id != null]) && length(azurerm_container_app.api.secret) == 2
     error_message = "The provider key must be a Key Vault reference, never a value."
   }
 }
@@ -316,6 +359,143 @@ run "locks_can_be_removed_deliberately" {
   assert {
     condition     = length(azurerm_management_lock.postgres) == 0
     error_message = "Setting the switch to false removes the locks."
+  }
+}
+
+# ------------------------------------------------------------------ events, agents and readers
+
+run "each_consumer_set_is_its_own_app_with_no_ingress_and_no_stored_secret" {
+  command = apply
+
+  assert {
+    condition     = length(azurerm_container_app.events) == 2 && contains(keys(azurerm_container_app.events), "notifier") && contains(keys(azurerm_container_app.events), "agents")
+    error_message = "The default consumer sets are notifier and agents, one app each."
+  }
+  assert {
+    condition     = alltrue([for k, a in azurerm_container_app.events : length(a.ingress) == 0 && a.template[0].min_replicas >= 1])
+    error_message = "Event consumers have no ingress and never scale to zero (nothing would wake a poller)."
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.events["notifier"].template[0].container[0].env : e if e.name == "REACTOR_CONSUMERS"]).value == "notifier" && one([for e in azurerm_container_app.events["notifier"].template[0].container[0].env : e if e.name == "ROLE"]).value == "events"
+    error_message = "A set runs ROLE=events with exactly the consumers it names."
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.events["agents"].template[0].container[0].env : e if e.name == "AGENTS"]).value == "precheck"
+    error_message = "The agents set auto-runs the pre-check agent."
+  }
+  assert {
+    condition     = !anytrue([for k, a in azurerm_container_app.events : anytrue([for e in a.template[0].container[0].env : e.value != null && can(regex("PASSWORD|SECRET|KEY", e.name))])])
+    error_message = "Event consumers hold no secret as a plain value."
+  }
+  assert {
+    condition     = alltrue([for k, a in azurerm_container_app.events : one([for e in a.template[0].container[0].env : e if e.name == "WEBHOOK_ALLOW_PRIVATE"]).value == "0"])
+    error_message = "Reader webhooks to private addresses are demo-only and must be off."
+  }
+  assert {
+    condition     = length(azurerm_monitor_metric_alert.events_replicas) == 2 && azurerm_monitor_scheduled_query_rules_alert_v2.dead_delivery.severity == 1
+    error_message = "Each set has a replica alert, and dead deliveries page someone."
+  }
+}
+
+run "a_new_agent_is_one_more_entry_and_nothing_else" {
+  command = apply
+  variables {
+    consumer_sets = {
+      notifier = { consumers = "notifier" }
+      agents   = { consumers = "agent:precheck", agents = "precheck" }
+      redactor = { consumers = "agent:redactor", agents = "redactor", cpu = 0.5, memory = "1Gi" }
+    }
+  }
+
+  assert {
+    condition     = length(azurerm_container_app.events) == 3 && length(azurerm_monitor_metric_alert.events_replicas) == 3
+    error_message = "A third consumer set gets its own app and its own alert."
+  }
+  assert {
+    condition     = azurerm_container_app.api.template[0].min_replicas == 2 && azurerm_container_app.worker.template[0].min_replicas == 2
+    error_message = "The api and worker are untouched by a new consumer set."
+  }
+}
+
+run "mail_goes_through_the_managed_identity_not_a_password" {
+  command = apply
+
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "EMAIL_TRANSPORT"]).value == "acs"
+    error_message = "Production mail uses Azure Communication Services."
+  }
+  assert {
+    condition     = !anytrue([for e in azurerm_container_app.api.template[0].container[0].env : contains(["SMTP_URL", "ACS_CONNECTION_STRING"], e.name)])
+    error_message = "There must be no SMTP password or connection string."
+  }
+  assert {
+    condition     = azurerm_role_assignment.app_send_email[0].role_definition_name == "Communication and Email Service Owner" && azurerm_role_assignment.app_send_email[0].principal_id == azurerm_user_assigned_identity.app.principal_id
+    error_message = "The app identity, and only it, may send."
+  }
+  assert {
+    condition     = azurerm_email_communication_service_domain.main[0].domain_management == "AzureManaged"
+    error_message = "The default sender is an Azure-managed domain (works without DNS)."
+  }
+  assert {
+    condition     = one([for s in azurerm_container_app.api.secret : s if s.name == "reader-token-key"]).key_vault_secret_id != null
+    error_message = "The reader token key is a Key Vault reference."
+  }
+}
+
+run "mail_can_be_switched_off" {
+  command = apply
+  variables {
+    enable_reader_email = false
+  }
+
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "EMAIL_TRANSPORT"]).value == "off" && length(azurerm_communication_service.main) == 0 && length(azurerm_role_assignment.app_send_email) == 0
+    error_message = "Without reader email there is no Communication Services and no role."
+  }
+}
+
+run "the_edge_caches_public_reads_and_limits_the_form" {
+  command = apply
+
+  assert {
+    condition     = azurerm_cdn_frontdoor_route.public[0].patterns_to_match == tolist(["/api/public/*"]) && length(azurerm_cdn_frontdoor_route.public[0].cache) == 1
+    error_message = "Only the public read routes are cached."
+  }
+  assert {
+    condition     = length(azurerm_cdn_frontdoor_route.app[0].cache) == 0
+    error_message = "The staff API and the web app are never cached."
+  }
+  assert {
+    condition     = azurerm_cdn_frontdoor_firewall_policy.main[0].mode == "Prevention" && one(azurerm_cdn_frontdoor_firewall_policy.main[0].custom_rule).rate_limit_threshold == 20
+    error_message = "The WAF blocks (not just logs) and rate limits the subscription form."
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "TRUST_PROXY"]).value == "2" && startswith(one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "PUBLIC_BASE_URL"]).value, "https://")
+    error_message = "Behind Front Door two proxy hops are trusted and links use https."
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "EDGE_ID"]).value == "11111111-aaaa-bbbb-cccc-dddddddddddd"
+    error_message = "The api accepts only requests that carry the Front Door id, so the WAF and cache cannot be skipped."
+  }
+  assert {
+    condition     = alltrue([for k, a in azurerm_container_app.events : one([for e in a.template[0].container[0].env : e if e.name == "AGENTS"]).value == "precheck"]) && one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "AGENTS"]).value == "precheck"
+    error_message = "Every process, api included, gets the same AGENTS: the writer of an event decides who receives it."
+  }
+}
+
+run "without_front_door_the_app_serves_itself" {
+  command = apply
+  variables {
+    enable_front_door = false
+  }
+
+  assert {
+    condition     = length(azurerm_cdn_frontdoor_profile.main) == 0 && length(azurerm_cdn_frontdoor_firewall_policy.main) == 0
+    error_message = "No edge resources when it is switched off."
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "TRUST_PROXY"]).value == "1" && strcontains(one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "PUBLIC_BASE_URL"]).value, "azurecontainerapps.io")
+    error_message = "One proxy hop, and links point at the app's own address."
   }
 }
 
@@ -367,4 +547,28 @@ run "rejects_unknown_role_group" {
     role_groups = { janitor = "66666666-6666-6666-6666-666666666666" }
   }
   expect_failures = [var.role_groups]
+}
+
+run "rejects_a_consumer_set_that_would_run_everything" {
+  command = plan
+  variables {
+    consumer_sets = { all = { consumers = " " } }
+  }
+  expect_failures = [var.consumer_sets]
+}
+
+run "rejects_a_scaled_to_zero_consumer_set" {
+  command = plan
+  variables {
+    consumer_sets = { notifier = { consumers = "notifier", min_replicas = 0 } }
+  }
+  expect_failures = [var.consumer_sets]
+}
+
+run "rejects_more_consumer_replicas_than_the_database_can_serve" {
+  command = plan
+  variables {
+    consumer_sets = { a = { consumers = "a", max_replicas = 4 }, bb = { consumers = "b", max_replicas = 4 } }
+  }
+  expect_failures = [var.consumer_sets]
 }

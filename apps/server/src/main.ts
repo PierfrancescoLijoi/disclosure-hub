@@ -6,8 +6,8 @@ const config = loadConfig();
 const rt = await createRuntime(config);
 await rt.start();
 
-// A worker-only process has no HTTP surface; the queue and the sweeper are its whole job.
-const app = config.ROLE === 'worker' ? undefined : await buildApp(rt);
+// Worker and events processes have no HTTP surface: the queue and sweeper, or the event reactor, are their whole job.
+const app = config.ROLE === 'worker' || config.ROLE === 'events' ? undefined : await buildApp(rt);
 if (app) await app.listen({ host: config.HOST, port: config.PORT });
 
 rt.log.info(

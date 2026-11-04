@@ -111,6 +111,10 @@ describe('operational limits', () => {
       expect(res.body).toContain('hub_publications{status="pending"} 1');
       expect(res.body).toContain('hub_announcements{status="publishing"} 1');
       expect(res.body).toMatch(/hub_oldest_waiting_publication_seconds \d/);
+      // The reactor is idle in tests, so the submit event is still waiting for its consumer.
+      expect(res.body).toMatch(/hub_pending_deliveries [1-9]/);
+      expect(res.body).toContain('hub_dead_deliveries 0');
+      expect(res.body).toMatch(/hub_oldest_pending_delivery_seconds \d/);
     } finally {
       await app.close();
     }

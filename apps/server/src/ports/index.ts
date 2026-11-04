@@ -11,6 +11,11 @@ import type {
   Status,
   ValidationReport,
 } from '../domain/types.js';
+import type { EventsStore, EventStats } from './events.js';
+import type { NotificationsStore, SubscriptionsStore } from './readers.js';
+
+export * from './events.js';
+export * from './readers.js';
 
 export interface Clock {
   now(): Date;
@@ -42,9 +47,12 @@ export type ListItem = Announcement & {
 /** What a stranger may read about a published announcement: no people, no approvals, no metadata. */
 export interface PublicItem {
   id: string;
+  issuerId: string;
   jurisdiction: string;
   category: string;
   headline: string;
+  /** The first words of the body, for lists, feeds and notifications. */
+  excerpt: string;
   issuerName: string;
   receipt: string;
   filingDate: string | null;
@@ -52,7 +60,13 @@ export interface PublicItem {
 }
 export type PublicDetail = PublicItem & { body: string };
 export interface PublicQuery {
+  issuerId?: string;
   jurisdiction?: string;
+  category?: string;
+  /** Inclusive publication dates, YYYY-MM-DD (UTC). */
+  from?: string;
+  to?: string;
+  /** Words matched against headline, body and company name. */
   q?: string;
   limit: number;
   cursor?: string;
@@ -114,6 +128,10 @@ export interface AiReportRecord {
   provider: string;
   report: unknown;
   at: string;
+  /** Which agent wrote it ('precheck' for the on-demand button). */
+  agent: string;
+  /** The event that triggered it; a redelivered event writes one report. */
+  eventId: string | null;
 }
 
 /** Every method that touches tenant data takes issuerId and filters on it in the query. */
@@ -135,6 +153,8 @@ export interface StoreTx {
     /** Published announcements across all companies, newest first. The only query that crosses a company boundary. */
     publicFeed(q: PublicQuery): Promise<{ items: PublicItem[]; nextCursor: string | null }>;
     publicGet(id: string): Promise<PublicDetail | null>;
+    /** Companies with at least one published announcement. */
+    publicIssuers(): Promise<{ id: string; name: string }[]>;
     /** Compare-and-set on version; bumps version. Throws a 409 when the version moved. */
     update(issuerId: string, id: string, expectedVersion: number, patch: AnnouncementPatch, at: string): Promise<void>;
   };
@@ -175,9 +195,14 @@ export interface StoreTx {
   };
   aiReports: {
     insert(r: AiReportRecord): Promise<void>;
-    latest(announcementId: string): Promise<AiReportRecord | null>;
+    latest(announcementId: string, agent?: string): Promise<AiReportRecord | null>;
+    forEvent(agent: string, eventId: string): Promise<AiReportRecord | null>;
+    forRevision(announcementId: string, revision: number): Promise<AiReportRecord[]>;
   };
   settings: { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void> };
+  events: EventsStore;
+  subscriptions: SubscriptionsStore;
+  notifications: NotificationsStore;
 }
 
 /** Cross-tenant operational counts for metrics. Never exposed to tenants, never carries content. */
@@ -186,6 +211,7 @@ export interface OpsStats {
   announcementsByStatus: Record<string, number>;
   /** Age in seconds of the oldest publication waiting for a worker; 0 when none is waiting. */
   oldestWaitingSeconds: number;
+  events: EventStats;
 }
 
 export interface Store {

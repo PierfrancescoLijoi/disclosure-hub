@@ -10,8 +10,8 @@ const int = (fallback: number) => z.coerce.number().int().min(0).default(fallbac
 
 export const ConfigSchema = z
   .object({
-    /** api: HTTP only. worker: queue consumer + sweeper. all: both in one process (local mode). */
-    ROLE: z.enum(['api', 'worker', 'all']).default('all'),
+    /** api: HTTP only. worker: publication queue consumer + sweeper. events: the event reactor only (pick consumers with REACTOR_CONSUMERS). all: everything in one process (local mode). */
+    ROLE: z.enum(['api', 'worker', 'events', 'all']).default('all'),
     HOST: z.string().default('0.0.0.0'),
     PORT: int(3000),
     /** `sqlite:./data/hub.db`, `sqlite::memory:` or `postgres://...` */
@@ -53,6 +53,30 @@ export const ConfigSchema = z
     RATE_LIMIT_PER_MIN: int(600),
     /** AI pre-check calls per actor per minute: each one can cost money with a real provider. */
     PRECHECK_RATE_LIMIT_PER_MIN: int(20),
+    /** Seconds-level poll of the event outbox by consumers (reader notifications, agents). */
+    REACTOR_POLL_MS: int(1000),
+    REACTOR_MAX_ATTEMPTS: int(8),
+    /** Comma list of consumer ids this process runs (for example `notifier` or `agent:precheck`); empty runs all. */
+    REACTOR_CONSUMERS: z.string().default(''),
+    /** Comma list of agents that run by themselves on events. Unset: the pre-check when AI_PROVIDER=mock (free), none otherwise (a real provider costs money per submit). */
+    AGENTS: z.string().optional(),
+    /** Public address of the site; links in notifications and the feed point here. */
+    PUBLIC_BASE_URL: z.string().url().default('http://localhost:3000'),
+    /** Derives confirmation, unsubscribe and webhook-signing secrets. At least 32 characters; required unless DEMO=1. */
+    READER_TOKEN_KEY: z.string().min(32).optional(),
+    /** `off`: no email. `log`: demo mailbox in memory and logs. `smtp`: SMTP_URL (Mailpit locally). `acs`: Azure Communication Services Email with the managed identity. */
+    EMAIL_TRANSPORT: z.enum(['off', 'log', 'smtp', 'acs']).optional(),
+    EMAIL_FROM: z.string().default('announcements@localhost'),
+    SMTP_URL: z.string().optional(),
+    ACS_ENDPOINT: z.string().url().optional(),
+    /** Reader webhooks; off removes the option from the public form. */
+    WEBHOOKS: flag(true),
+    /** Allow webhooks to private addresses and plain http (local demo only; never in production). */
+    WEBHOOK_ALLOW_PRIVATE: flag(false),
+    /** Reverse proxies in front of the API (Front Door, ingress): how many X-Forwarded-For hops to trust for the client address. */
+    TRUST_PROXY: int(0),
+    /** Azure Front Door id: when set, requests that do not carry it in X-Azure-FDID (the edge adds it) are refused, so the WAF and cache cannot be skipped by calling the app directly. Probes are exempt. */
+    EDGE_ID: z.string().min(8).optional(),
     WORKER_CONCURRENCY: int(4),
     GATEWAY_CONCURRENCY: int(2),
     WEB_DIST: z.string().optional(),
@@ -72,6 +96,15 @@ export const ConfigSchema = z
     }
     if (c.QUEUE_URL === 'inproc' && c.ROLE !== 'all') {
       ctx.addIssue({ code: 'custom', path: ['QUEUE_URL'], message: 'The in-process queue only works with ROLE=all; use pg or redis:// for split roles' });
+    }
+    const email = c.EMAIL_TRANSPORT ?? (c.DEMO ? 'log' : 'off');
+    if (email === 'smtp' && !c.SMTP_URL) ctx.addIssue({ code: 'custom', path: ['SMTP_URL'], message: 'EMAIL_TRANSPORT=smtp needs SMTP_URL' });
+    if (email === 'acs' && !c.ACS_ENDPOINT) ctx.addIssue({ code: 'custom', path: ['ACS_ENDPOINT'], message: 'EMAIL_TRANSPORT=acs needs ACS_ENDPOINT' });
+    if (!c.DEMO && c.ROLE !== 'worker' && !c.READER_TOKEN_KEY && (email !== 'off' || c.WEBHOOKS)) {
+      ctx.addIssue({ code: 'custom', path: ['READER_TOKEN_KEY'], message: 'Reader subscriptions need READER_TOKEN_KEY (32+ characters) unless DEMO=1; set EMAIL_TRANSPORT=off and WEBHOOKS=0 to switch them off' });
+    }
+    if (c.WEBHOOK_ALLOW_PRIVATE && !c.DEMO) {
+      ctx.addIssue({ code: 'custom', path: ['WEBHOOK_ALLOW_PRIVATE'], message: 'WEBHOOK_ALLOW_PRIVATE is for the local demo only' });
     }
     if (c.AI_PROVIDER === 'anthropic' && !c.ANTHROPIC_API_KEY) {
       ctx.addIssue({ code: 'custom', path: ['ANTHROPIC_API_KEY'], message: 'AI_PROVIDER=anthropic needs ANTHROPIC_API_KEY' });

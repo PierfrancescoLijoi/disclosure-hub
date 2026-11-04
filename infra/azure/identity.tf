@@ -90,7 +90,7 @@ resource "azuread_application" "web" {
 
   # Authorization Code with PKCE for a public client: no secret exists.
   single_page_application {
-    redirect_uris = concat(["${local.app_url}/"], [for u in var.extra_redirect_uris : u])
+    redirect_uris = distinct(concat(["${local.app_url}/", "${local.public_base_url}/"], [for u in var.extra_redirect_uris : u]))
   }
 
   required_resource_access {

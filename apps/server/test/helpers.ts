@@ -6,7 +6,8 @@ import { loadConfig } from '../src/config.js';
 import { civilOf } from '../src/domain/calendar.js';
 import type { PolicyRegistry } from '../src/domain/policy.js';
 import type { Actor } from '../src/domain/types.js';
-import type { GatewayRegistry, JobQueue, Clock, Logger } from '../src/ports/index.js';
+import type { AdvisoryAgent } from '../src/application/agents.js';
+import type { ChannelRegistry, Consumer, GatewayRegistry, JobQueue, Clock, Logger } from '../src/ports/index.js';
 import { createRuntime, type Runtime } from '../src/runtime.js';
 
 /** TEST_LOG=1 prints what the runtime logs, for debugging a flaky run. */
@@ -53,6 +54,9 @@ export interface EnvOptions {
   manualQueue?: boolean;
   policies?: PolicyRegistry;
   gateways?: GatewayRegistry;
+  consumers?: Consumer[];
+  agents?: AdvisoryAgent[];
+  channels?: ChannelRegistry;
 }
 
 /**
@@ -73,6 +77,7 @@ export async function makeEnv(o: EnvOptions = {}): Promise<Env> {
     RETRY_BASE_MS: '1',
     RETRY_MAX_MS: '4',
     SWEEP_INTERVAL_MS: '600000',
+    REACTOR_POLL_MS: '600000',
     ...o.env,
   });
   const queue = o.manualQueue ? new RecordingQueue() : undefined;
@@ -84,6 +89,9 @@ export async function makeEnv(o: EnvOptions = {}): Promise<Env> {
     queue,
     policies: o.policies,
     gateways: o.gateways,
+    consumers: o.consumers,
+    agents: o.agents,
+    channels: o.channels,
   });
   await rt.start();
   const load = async (id: string) => (await rt.store.read.users.get(id))!;
@@ -173,3 +181,15 @@ export const fx = {
 };
 
 export const withBody = (i: CreateInput, body: string): CreateInput => ({ ...i, body });
+
+/** Draft to published through the real workflow, with the wire and the event consumers settled. */
+export async function publishAnnouncement(e: Env, input: CreateInput = fx.ukGeneral(), approvers: Actor[] = [e.actors.bob]): Promise<string> {
+  const { id } = await e.svc.create(e.actors.alice, input);
+  await e.svc.validate(e.actors.alice, id);
+  await e.svc.submit(e.actors.alice, id);
+  for (const a of approvers) await e.svc.approve(a, id);
+  await e.svc.publish(e.actors.erin, id);
+  await e.settle();
+  await e.rt.reactor.drain();
+  return id;
+}
