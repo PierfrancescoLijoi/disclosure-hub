@@ -17,41 +17,60 @@ jurisdictions, with one shared workflow and per-jurisdiction rules and delivery.
 
 ## Quick start from a clean computer
 
-You need a terminal, **Git** and **Node.js 22 or newer** (the current LTS from <https://nodejs.org> is fine). Nothing else:
-no database, no Docker, no compiler, no Python, no account, no API key. Check what you have:
+Nothing needs to be installed first: no Node.js, no Git, no database, no Docker, no compiler, no Python, no account, no API
+key. You need the code folder and an internet connection.
+
+### 1. Get the code
+
+The repository is private, so sign in to GitHub with an account that has access, then on the repository page choose
+*Code, Download ZIP* and unzip it (or `git clone https://github.com/PierfrancescoLijoi/disclosure-hub.git`).
+
+### 2. Run the bootstrap
+
+| System | Do this |
+|---|---|
+| **Windows** | Double-click **`bootstrap.cmd`** in the unzipped folder, or run `bootstrap.cmd` in a terminal |
+| **Linux, macOS** | In a terminal, in the folder: `sh bootstrap.sh` |
+
+It does four things and tells you each step:
+
+1. Looks for Node.js 22 or newer. If it is missing, it downloads the official portable Node.js from nodejs.org into
+   `.tools/node` **inside this folder** and checks its SHA-256 against nodejs.org's published list. Nothing is installed
+   system-wide, no administrator rights are used, and your PATH is not changed.
+2. Installs the dependencies (`npm install`). They are ready-made, so no compiler or Python is needed.
+3. Builds the web app, creates a local SQLite database in `apps/server/data/` and seeds demo companies and people.
+4. Starts the app. When it prints `Open http://localhost:3000`, open that address in a browser.
+
+Run the same command again later to start it; it will not download anything twice. To only prepare it without starting:
+`bootstrap.cmd -NoStart` (Windows) or `sh bootstrap.sh --no-start`. To remove everything, delete the folder.
+
+Needs: **Windows** with PowerShell (built in); **Linux or macOS** with `sh`, `tar`, and `curl` or `wget`. The bootstrap
+stops with a clear message if one is missing, if the download is blocked (a proxy or a firewall), or if a checksum does not
+match. In that case use the manual route below.
+
+### Manual route (if you prefer, or the bootstrap cannot download)
+
+Install **Node.js 22 or newer** (the current LTS from <https://nodejs.org>) and check it:
 
 ```bash
 node -v
 ```
 
-It must print `v22` or higher. If `git` is missing, install it from <https://git-scm.com>.
-
-**Node 20 or older is refused** with an `EBADENGINE` message that names the required version. The reason: the SQLite driver
-(`better-sqlite3`) ships ready-made binaries for Node 22 and newer only, so older versions would have to compile it, which
-needs Python and a C++ toolchain (Visual Studio Build Tools on Windows).
-
-**1. Get the code.** The repository is private, so sign in to GitHub with an account that has access (or use the
-*Code, Download ZIP* button and unzip it):
+It must print `v22` or higher. **Node 20 or older is refused** with an `EBADENGINE` message that names the required
+version, because the SQLite driver (`better-sqlite3`) ships ready-made binaries for Node 22 and newer only: older versions
+would have to compile it, which needs Python and a C++ toolchain (Visual Studio Build Tools on Windows). Then, in the
+code folder (the same commands on Windows PowerShell, macOS and Linux):
 
 ```bash
-git clone https://github.com/PierfrancescoLijoi/disclosure-hub.git
-```
-
-**2. Install and start** (the same commands on Windows PowerShell, macOS and Linux):
-
-```bash
-cd disclosure-hub
 npm install
 npm start
 ```
 
-`npm install` downloads the dependencies once. `npm start` builds the web app, creates a local SQLite database in
-`apps/server/data/`, seeds demo companies and people, and starts everything in one process. When the log says
-`open http://localhost:3000`, open that address.
+### 3. Use it
 
-**3. Use it.** On the sign-in page pick **alice** (author), write and submit an announcement for the UK or the US, then
+On the sign-in page pick **alice** (author), write and submit an announcement for the UK or the US, then
 sign in as the approvers (**bob**, **carol**, **dan**) and approve, then as **erin** to publish. The step-by-step walk-through
-is under [Try it](#try-it). To watch the whole flow without a browser, open a second terminal in the same folder and run:
+is under [Try it](#try-it). To watch the whole flow without a browser, with the app running, open a second terminal in the same folder and run `bootstrap.cmd -Demo` (Windows), `sh bootstrap.sh --demo` (Linux, macOS) or, if you installed Node yourself:
 
 ```bash
 npm run demo
@@ -330,6 +349,7 @@ apps/server/src
   auth/           OIDC bearer-token verification (Entra ID, Keycloak)
   http/           Fastify routes, auth hook, rate limit, metrics, public routes, static web serving
 apps/web          React + Vite single-page app (UI built from the SignalFlow IR product spec, see docs/UI.md): composer, review room, publishing console, public archive with follow, confirm and unsubscribe pages; OIDC sign-in
+bootstrap.cmd, bootstrap.sh, scripts/   one-command setup for a computer with nothing installed (portable Node, dependencies, start)
 deploy/keycloak   the local identity provider's realm
 infra/azure       Terraform for the Azure deployment, mocked tests, verify script
 discovery/        requirements work: assumptions, EARS requirements, open questions
