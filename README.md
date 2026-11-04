@@ -34,7 +34,7 @@ a domain event, so adding another agent or channel does not touch the workflow.
 | Queue | In-process | PostgreSQL `LISTEN/NOTIFY` | Same |
 | Processes | One | api, worker x N, notifier, agents, migrate job | Container Apps api, worker (2+ each), one app per consumer set, migrate job |
 | Reader mail | In-memory demo mailbox (`/public/mailbox`) | Mailpit (inbox on :8025) | Azure Communication Services Email, managed identity |
-| Public edge | none | nginx cache on `/api/public` | Front Door Standard + WAF rate rule |
+| Public edge | none | nginx cache on `/api/public` | Front Door Premium, managed WAF and Private Link (production); Standard public edge in the cheaper development profile |
 | Secrets | none | demo passwords in the compose file | none stored: managed identities, Key Vault |
 | Status | run and tested | run and tested | **validated offline, not applied** |
 
@@ -134,7 +134,7 @@ and run `AUTH=oidc GATEWAY_LATENCY_MS=200 N=200 CONCURRENCY=5 npm run bench`. Re
 ## Tests
 
 ```bash
-npm test            # 161 server tests (7 need PostgreSQL or Redis and are skipped), SQLite in memory, a few seconds
+npm test               # 176 server tests pass; 7 integration tests need PostgreSQL or Redis and are skipped
 npm test -w apps/web   # 12 UI logic tests (diff, attention queue, readiness)
 npm run typecheck
 ```
@@ -147,7 +147,7 @@ docker run -d --name hub-test-redis -p 56379:6379 redis:7-alpine
 
 TEST_PG_URL=postgres://hub:hub-dev-only@localhost:55432/hub_test \
 TEST_REDIS_URL=redis://localhost:56379 \
-npm test -w apps/server -- --no-file-parallelism     # 168 tests
+npm test -w apps/server -- --no-file-parallelism     # 183 server tests
 ```
 
 With `TEST_PG_URL` every integration test runs on PostgreSQL (the schema is dropped and recreated per

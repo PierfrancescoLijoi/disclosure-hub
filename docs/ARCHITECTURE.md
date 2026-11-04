@@ -189,7 +189,7 @@ Verified by running it:
 
 - Draft to published in UK and US through the UI, the REST demo and the tests.
 - Retry with backoff, exhaustion and manual retry, permanent rejection, lost acknowledgement (reconciled), lease takeover after a crash, lost wake-up recovery by the sweeper.
-- Same suite on SQLite (161 tests, 7 skipped) and on PostgreSQL + Redis (168 tests, including two workers), plus 12 UI logic tests. The screens are described in docs/UI.md.
+- Same suite on SQLite (176 passing, 7 integration tests skipped) and on PostgreSQL + Redis (183 tests, including two workers), plus 12 UI logic tests. The screens are described in docs/UI.md.
 - Real authentication: tokens verified against a JWKS (valid, expired, wrong audience or issuer, forged, unknown role, provider down), and sign-in with Authorization Code + PKCE through a real browser against Keycloak.
 - The PostgreSQL queue on a real database, with two workers and after the listener connection is cut.
 - The Compose twin (Keycloak, PostgreSQL queue, migrate job, 2 workers) with the demo and a benchmark using real tokens.
