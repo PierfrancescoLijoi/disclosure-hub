@@ -113,6 +113,19 @@ export function buildEventsStore(db: Kysely<DB>): EventsStore {
       return Number(res.numUpdatedRows) === 1;
     },
 
+    async prune(before, limit) {
+      const old = db.selectFrom('event_deliveries').select('id').where('status', '=', 'done').where('updated_at', '<', before).limit(limit);
+      const deliveries = await db.deleteFrom('event_deliveries').where('id', 'in', old).executeTakeFirst();
+      const orphans = db
+        .selectFrom('domain_events')
+        .select('domain_events.id')
+        .where('domain_events.created_at', '<', before)
+        .where((eb) => eb.not(eb.exists(eb.selectFrom('event_deliveries').select('event_deliveries.id').whereRef('event_deliveries.event_id', '=', 'domain_events.id'))))
+        .limit(limit);
+      const events = await db.deleteFrom('domain_events').where('id', 'in', orphans).executeTakeFirst();
+      return { deliveries: Number(deliveries.numDeletedRows), events: Number(events.numDeletedRows) };
+    },
+
     async forAggregate(aggregateId) {
       const rows = await db
         .selectFrom('event_deliveries')

@@ -77,6 +77,15 @@ export const ConfigSchema = z
     TRUST_PROXY: int(0),
     /** Azure Front Door id: when set, requests that do not carry it in X-Azure-FDID (the edge adds it) are refused, so the WAF and cache cannot be skipped by calling the app directly. Probes are exempt. */
     EDGE_ID: z.string().min(8).optional(),
+    /** `log` lets a request without the edge id through and writes a warning: the way to prove the edge sends the header before turning `enforce` on. */
+    EDGE_ID_MODE: z.enum(['enforce', 'log']).default('enforce'),
+    /** A second connection, to a read replica, used only for the public archive and feed (cached at the edge, so replica lag is invisible). Same auth as DATABASE_URL. */
+    READ_DATABASE_URL: z.string().optional(),
+    /** Finished deliveries (and the events nobody waits for) older than this are deleted; dead ones stay until a person looks. */
+    OUTBOX_RETENTION_DAYS: int(14),
+    OUTBOX_PRUNE_MS: int(3_600_000),
+    /** Followers one notifier delivery handles before it continues in a new one. */
+    NOTIFY_CHUNK: z.coerce.number().int().min(1).default(1000),
     WORKER_CONCURRENCY: int(4),
     GATEWAY_CONCURRENCY: int(2),
     WEB_DIST: z.string().optional(),
@@ -85,6 +94,9 @@ export const ConfigSchema = z
     const postgres = /^postgres(ql)?:\/\//.test(c.DATABASE_URL);
     if (c.QUEUE_URL === 'pg' && !postgres) {
       ctx.addIssue({ code: 'custom', path: ['QUEUE_URL'], message: 'QUEUE_URL=pg needs a PostgreSQL DATABASE_URL' });
+    }
+    if (c.READ_DATABASE_URL && !/^postgres(ql)?:\/\//.test(c.READ_DATABASE_URL)) {
+      ctx.addIssue({ code: 'custom', path: ['READ_DATABASE_URL'], message: 'READ_DATABASE_URL must be a PostgreSQL URL (a read replica)' });
     }
     if (c.DATABASE_AUTH === 'azure-managed-identity' && !postgres) {
       ctx.addIssue({ code: 'custom', path: ['DATABASE_AUTH'], message: 'azure-managed-identity needs a PostgreSQL DATABASE_URL' });

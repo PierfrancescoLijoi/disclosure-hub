@@ -21,6 +21,16 @@ mock_provider "azurerm" {
       id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Network/virtualNetworks/vnet-dhub-test"
     }
   }
+  mock_resource "azurerm_nat_gateway" {
+    defaults = {
+      id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Network/natGateways/natgw-dhub-test"
+    }
+  }
+  mock_resource "azurerm_public_ip" {
+    defaults = {
+      id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Network/publicIPAddresses/pip-dhub-test-nat"
+    }
+  }
   mock_resource "azurerm_subnet" {
     defaults = {
       id = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dhub-test/providers/Microsoft.Network/virtualNetworks/vnet-dhub-test/subnets/snet-x"
@@ -487,6 +497,7 @@ run "without_front_door_the_app_serves_itself" {
   command = apply
   variables {
     enable_front_door = false
+    private_ingress   = false
   }
 
   assert {
@@ -496,6 +507,208 @@ run "without_front_door_the_app_serves_itself" {
   assert {
     condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "TRUST_PROXY"]).value == "1" && strcontains(one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "PUBLIC_BASE_URL"]).value, "azurecontainerapps.io")
     error_message = "One proxy hop, and links point at the app's own address."
+  }
+}
+
+# ------------------------------------------------------------------ private network, edge tier, second region
+
+run "the_data_plane_is_private_and_egress_has_one_address" {
+  command = apply
+
+  assert {
+    condition     = azurerm_container_registry.main.sku == "Premium" && azurerm_container_registry.main.public_network_access_enabled == false && azurerm_container_registry.main.admin_enabled == false
+    error_message = "The registry is Premium, closed to the internet and has no shared password."
+  }
+  assert {
+    condition     = length(azurerm_container_registry_agent_pool.build) == 1 && length(azurerm_private_endpoint.acr) == 1 && length(azurerm_private_endpoint.vault) == 1
+    error_message = "Builds run inside the network and both the registry and the vault have private endpoints."
+  }
+  assert {
+    condition     = azurerm_key_vault.main.public_network_access_enabled == false && length(azurerm_key_vault.main.network_acls[0].ip_rules) == 0
+    error_message = "The vault is closed to the internet unless an operator address is listed."
+  }
+  assert {
+    condition     = length(azurerm_nat_gateway.main) == 1 && length(azurerm_subnet_nat_gateway_association.aca) == 1
+    error_message = "Outbound traffic leaves through the NAT gateway."
+  }
+  assert {
+    condition     = azurerm_container_app_environment.main.public_network_access == "Disabled" && length(azurerm_network_security_rule.aca_https_from_internet) == 0
+    error_message = "The environment has no public address and no subnet rule admits the internet."
+  }
+}
+
+run "the_edge_is_premium_with_managed_rules_and_a_private_origin" {
+  command = apply
+
+  assert {
+    condition     = azurerm_cdn_frontdoor_profile.main[0].sku_name == "Premium_AzureFrontDoor"
+    error_message = "Private Link and the managed rule sets need Premium."
+  }
+  assert {
+    condition     = toset([for r in azurerm_cdn_frontdoor_firewall_policy.main[0].managed_rule : "${r.type}:${r.version}"]) == toset(["Microsoft_DefaultRuleSet:2.1", "Microsoft_BotManagerRuleSet:1.1"]) && alltrue([for r in azurerm_cdn_frontdoor_firewall_policy.main[0].managed_rule : r.action == "Log"])
+    error_message = "Both managed rule sets are attached, in Log first."
+  }
+  assert {
+    condition     = one(azurerm_cdn_frontdoor_origin.api[0].private_link).target_type == "managedEnvironments"
+    error_message = "The origin is reached over Private Link to the Container Apps environment."
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "EDGE_ID_MODE"]).value == "log"
+    error_message = "The edge id starts in log mode so a wrong header cannot lock everyone out."
+  }
+}
+
+run "edge_id_can_be_enforced" {
+  command = apply
+  variables {
+    edge_id_mode = "enforce"
+  }
+
+  assert {
+    condition     = one([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "EDGE_ID_MODE"]).value == "enforce"
+    error_message = "enforce is passed to the app."
+  }
+}
+
+run "the_waf_can_block" {
+  command = apply
+  variables {
+    waf_managed_rules_action = "Block"
+  }
+
+  assert {
+    condition     = alltrue([for r in azurerm_cdn_frontdoor_firewall_policy.main[0].managed_rule : r.action == "Block"])
+    error_message = "Managed rules block when asked to."
+  }
+}
+
+run "a_cheap_development_environment_stays_public_and_standard" {
+  command = apply
+  variables {
+    private_data_plane = false
+    private_ingress    = false
+    waf_managed_rules  = false
+  }
+
+  assert {
+    condition     = azurerm_container_registry.main.sku == "Standard" && azurerm_container_registry.main.public_network_access_enabled == true && length(azurerm_container_registry_agent_pool.build) == 0 && length(azurerm_private_endpoint.acr) == 0
+    error_message = "Without the private data plane the registry is Standard and public, with no endpoints or agent pool."
+  }
+  assert {
+    condition     = azurerm_cdn_frontdoor_profile.main[0].sku_name == "Standard_AzureFrontDoor" && length(azurerm_cdn_frontdoor_firewall_policy.main[0].managed_rule) == 0 && length(azurerm_nat_gateway.main) == 0
+    error_message = "Standard edge, no managed rules, no NAT gateway."
+  }
+  assert {
+    condition     = azurerm_container_app_environment.main.public_network_access == "Enabled" && length(azurerm_network_security_rule.aca_https_from_internet) == 1
+    error_message = "Public ingress admits HTTPS only."
+  }
+}
+
+run "an_operator_address_can_open_the_vault_for_the_first_secrets" {
+  command = apply
+  variables {
+    key_vault_allowed_ips = ["203.0.113.7"]
+  }
+
+  assert {
+    condition     = azurerm_key_vault.main.public_network_access_enabled == true && azurerm_key_vault.main.network_acls[0].default_action == "Deny" && azurerm_key_vault.main.network_acls[0].ip_rules == toset(["203.0.113.7"])
+    error_message = "Only the listed address gets in, the firewall still denies by default."
+  }
+}
+
+run "a_private_environment_needs_the_edge" {
+  command = plan
+  variables {
+    enable_front_door = false
+  }
+  expect_failures = [azurerm_container_app_environment.main]
+}
+
+run "the_second_region_is_a_replica_that_fails_over_by_decision" {
+  command = apply
+  variables {
+    dr_location = "northeurope"
+  }
+
+  assert {
+    condition     = azurerm_postgresql_flexible_server.dr[0].create_mode == "Replica" && azurerm_postgresql_flexible_server.dr[0].public_network_access_enabled == false
+    error_message = "The second region holds a private read replica of the primary."
+  }
+  assert {
+    condition     = azurerm_container_app.dr_api[0].template[0].min_replicas == 1 && azurerm_container_app.dr_worker[0].template[0].min_replicas == 0 && alltrue([for k, a in azurerm_container_app.dr_events : a.template[0].min_replicas == 0])
+    error_message = "Only the API runs in the standby region; writers wait for the promotion."
+  }
+  assert {
+    condition     = azurerm_cdn_frontdoor_origin.dr[0].priority == 2 && azurerm_cdn_frontdoor_origin.api[0].priority == 1 && length(azurerm_cdn_frontdoor_route.app[0].cdn_frontdoor_origin_ids) == 2
+    error_message = "Front Door prefers the primary and falls back to the second region."
+  }
+  assert {
+    condition     = length(azurerm_container_registry.main.georeplications) == 1 && length(azurerm_monitor_metric_alert.postgres_replica_lag) == 1
+    error_message = "Images are replicated to the second region and the replica lag is alerted."
+  }
+  assert {
+    condition     = length(azurerm_virtual_network_peering.primary_to_dr) == 1 && length(azurerm_virtual_network_peering.dr_to_primary) == 1 && length(azurerm_management_lock.postgres_dr) == 1
+    error_message = "The networks are peered for replication and the replica is protected from deletion."
+  }
+}
+
+run "there_is_no_second_region_by_default" {
+  command = apply
+
+  assert {
+    condition     = length(azurerm_resource_group.dr) == 0 && length(azurerm_postgresql_flexible_server.dr) == 0 && length(azurerm_cdn_frontdoor_origin.dr) == 0 && length(azurerm_container_registry.main.georeplications) == 0
+    error_message = "Nothing is created for a region nobody asked for."
+  }
+}
+
+run "the_second_region_must_be_another_region" {
+  command = plan
+  variables {
+    dr_location = "uksouth"
+  }
+  expect_failures = [azurerm_resource_group.dr]
+}
+
+run "the_second_region_needs_the_private_data_plane" {
+  command = plan
+  variables {
+    dr_location        = "northeurope"
+    private_data_plane = false
+  }
+  expect_failures = [azurerm_resource_group.dr]
+}
+
+run "a_read_replica_for_public_reads_is_opt_in" {
+  command = apply
+
+  assert {
+    condition     = length(azurerm_postgresql_flexible_server.read) == 0 && length([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "READ_DATABASE_URL"]) == 0
+    error_message = "No read replica and no READ_DATABASE_URL by default."
+  }
+}
+
+run "the_read_replica_is_wired_to_the_api_only" {
+  command = apply
+  variables {
+    read_replica = true
+  }
+
+  assert {
+    condition     = azurerm_postgresql_flexible_server.read[0].create_mode == "Replica" && length([for e in azurerm_container_app.api.template[0].container[0].env : e if e.name == "READ_DATABASE_URL"]) == 1
+    error_message = "The api gets READ_DATABASE_URL when the replica exists."
+  }
+  assert {
+    condition     = alltrue([for k, a in azurerm_container_app.events : length([for e in a.template[0].container[0].env : e if e.name == "READ_DATABASE_URL"]) == 0])
+    error_message = "Consumers write, so they stay on the primary."
+  }
+}
+
+run "the_database_has_an_early_warning_before_it_is_the_bottleneck" {
+  command = apply
+
+  assert {
+    condition     = azurerm_monitor_metric_alert.postgres_cpu_sustained.criteria[0].threshold == 60 && azurerm_monitor_metric_alert.postgres_cpu_sustained.severity == 3
+    error_message = "Sustained CPU above 60 % is the signal to look at replicas and Service Bus (docs/adr/0001)."
   }
 }
 
@@ -571,4 +784,28 @@ run "rejects_more_consumer_replicas_than_the_database_can_serve" {
     consumer_sets = { a = { consumers = "a", max_replicas = 4 }, bb = { consumers = "b", max_replicas = 4 } }
   }
   expect_failures = [var.consumer_sets]
+}
+
+run "rejects_an_unknown_edge_id_mode" {
+  command = plan
+  variables {
+    edge_id_mode = "sometimes"
+  }
+  expect_failures = [var.edge_id_mode]
+}
+
+run "rejects_an_unknown_waf_action" {
+  command = plan
+  variables {
+    waf_managed_rules_action = "Allow"
+  }
+  expect_failures = [var.waf_managed_rules_action]
+}
+
+run "rejects_a_second_region_without_zones" {
+  command = plan
+  variables {
+    dr_location = "brazilsouth"
+  }
+  expect_failures = [var.dr_location]
 }

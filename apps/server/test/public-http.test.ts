@@ -119,6 +119,11 @@ describe('public routes: following', () => {
     expect((await a.inject({ method: 'GET', url: '/healthz' })).statusCode).toBe(200);
   });
 
+  it('in log mode lets a request without the edge id through, so the header can be proven before it is enforced', async () => {
+    const { a } = await start({ env: { EDGE_ID: 'edge-guid-1234', EDGE_ID_MODE: 'log' } });
+    expect((await a.inject({ method: 'GET', url: '/api/public/options' })).statusCode).toBe(200);
+  });
+
   it('shows the demo mailbox to someone who is not signed in, since that is who follows', async () => {
     env = await makeEnv({ env: { EMAIL_TRANSPORT: 'log' } });
     app = await buildApp(env.rt);

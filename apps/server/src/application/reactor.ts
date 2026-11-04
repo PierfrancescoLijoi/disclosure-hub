@@ -13,8 +13,9 @@ export class EventBus {
     private readonly clock: Clock,
   ) {}
 
-  async emit(tx: StoreTx, e: NewEvent, at = this.clock.now().toISOString()): Promise<DomainEvent> {
-    const event: DomainEvent = { ...e, id: randomUUID(), at };
+  /** `id` makes the write idempotent: a second emit with the same id fails on the primary key instead of duplicating. */
+  async emit(tx: StoreTx, e: NewEvent, at = this.clock.now().toISOString(), id: string = randomUUID()): Promise<DomainEvent> {
+    const event: DomainEvent = { ...e, id, at };
     await tx.events.insert(event, this.consumers.idsFor(e.type), at);
     return event;
   }

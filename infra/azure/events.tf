@@ -93,6 +93,18 @@ resource "azurerm_container_app" "events" {
     }
   }
 
+  # Key Vault references and the image pull are checked when the app is created, so the access, the private
+  # path to the vault and the registry, and the outbound route must exist first.
+  depends_on = [
+    azurerm_role_assignment.app_vault_secrets,
+    azurerm_role_assignment.app_acr_pull,
+    azurerm_private_endpoint.vault,
+    azurerm_private_dns_zone_virtual_network_link.vault,
+    azurerm_private_endpoint.acr,
+    azurerm_private_dns_zone_virtual_network_link.acr,
+    azurerm_subnet_nat_gateway_association.aca,
+  ]
+
   lifecycle {
     ignore_changes = [template[0].container[0].image]
   }

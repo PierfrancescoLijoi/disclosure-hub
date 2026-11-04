@@ -15,7 +15,7 @@ them, and the measurements that back the model. Where a number comes from a meas
 | Growth headroom | 10x the peak with no change but replica count | The ceiling of the default configuration |
 | Availability | 99.9 % a month, business hours matter most | A zone loss or a deploy must not stop publication |
 | RPO / RTO, zone loss | 0 / minutes | Zone-redundant database with synchronous standby; two replicas minimum |
-| RPO / RTO, region loss | minutes to the last replicated backup / hours | Geo-redundant backup restored in the paired region; no warm second region by design |
+| RPO / RTO, region loss | with `dr_location`: replica lag (seconds, alerted at 5 min) / about 15 min after a person decides (design figure). Without it: last geo-redundant backup / hours | Read replica and a standby API in a second region, failover by decision (`docs/DR.md`); never rehearsed yet |
 | Data | announcements, revisions, approvals, audit; well under 1 GB a year | 300 a month at tens of KB with revisions |
 
 ## 2. Capacity model
@@ -62,6 +62,36 @@ the benchmark does not have yet (Keycloak's password grant has no Entra equivale
 test of the gateway needs the gateway's test endpoint. Both are listed as the first thing to do in `test` in
 `infra/azure/README.md`.
 
+### Readers, events and search, measured locally (2026-11-04)
+
+`npm run bench:readers -w apps/server` against PostgreSQL 16 in a container limited to 1 vCPU and 1 GiB, no HTTP,
+no sign-in, a mock mail channel that takes 20 ms a send. A laptop is not Azure: these show what grows with what.
+
+| Load | Result |
+|---|---|
+| Archive, latest 20, 10,000 / 100,000 published | 40 ms / 506 ms before migration 004; **5 ms / 2 ms after** |
+| Archive, one jurisdiction, 100,000 | 132 ms before, 3 ms after |
+| Archive search by a word, 10,000 / 100,000 | 70-140 ms / 0.9-2.0 s (a scan of every body; the edge cache and the word cap bound the cost) |
+| Outbox, claim and complete, 1 / 4 claimers | about 110 / 180 deliveries a second |
+| Outbox prune, one pass | 1,000 deliveries and 1,000 events in about 30 ms |
+| Notifier fan-out, 5,000 followers, 20 ms a send | about 275 followers a second (ceiling 500 for one process), 5 continuation events, nobody told twice |
+
+The listing index (migration 004) came from this measurement: the listing sorted every published announcement.
+Search by word remains a scan; its trigger and the next step are in `docs/adr/0001-database-bottleneck-and-service-bus.md`.
+
+### Not measured on Azure yet
+
+| What | How to measure it | Where the result goes |
+|---|---|---|
+| What the edge and the origin serve to a crowd | `infra/azure/loadtest/public-read.mjs`, `MODE=cached` then `MODE=origin`, against `test` | A row in the table below |
+| Database CPU, connections and replica lag during that run | Azure Monitor charts of the same minutes | The same row |
+| Staff-side throughput (the 16 announcements a second above) | Needs an Entra token source for a test identity with an app role; not built. The staff load is small (about 25 requests a second at the peak) and the public load is what a crowd produces, so the public run comes first | Section 3 |
+| Failover and restore times | `docs/DR.md`, a rehearsal | `docs/DR.md` table |
+
+| Date | Environment, SKU | Mode | Requests per second | p50 / p95 / p99 (ms) | Edge hit ratio | DB CPU | Notes |
+|---|---|---|---|---|---|---|---|
+| _not yet run_ | | | | | | | |
+
 ## 4. The same numbers locally and on Azure
 
 | | Local Compose | Azure |
@@ -81,8 +111,9 @@ test of the gateway needs the gateway's test endpoint. Both are listed as the fi
 | 3,000 people instead of 300 | API ceiling to 8, database SKU up one step, review the log volume and the rate limit |
 | Publications must go to more venues than the gateways today | Add a jurisdiction (a policy file and a gateway adapter); no change to capacity |
 | A worker ceiling above 6 | Move the queue to Service Bus or Redis |
-| A regional outage must cost minutes, not hours | Warm second region: read replica, second container environment, Front Door for failover |
-| Policy requires WAF, private endpoints for the registry and vault, an egress firewall | See "Not included" in `infra/azure/README.md`; none changes the application |
+| A regional outage must cost minutes, not hours | Set `dr_location` (built: replica, second container environment, Front Door fallback origin); rehearse it (`docs/DR.md`) |
+| The database CPU stays above 60 % | Read the slow-statement log, raise the SKU, `read_replica = true`; the triggers for Service Bus and for moving search out are in `docs/adr/0001-database-bottleneck-and-service-bus.md` |
+| Policy requires an allow-list of outbound destinations | Azure Firewall in the hub of a landing zone (`infra/azure-landing-zone`); the NAT gateway gives one address, it does not filter |
 
 ## 6. Cost: drivers, not prices
 
@@ -95,5 +126,8 @@ forecast, not an estimate, and it does not stop spending.
 | PostgreSQL | Two zone-redundant compute instances plus storage and backup. **The largest line.** | SKU, or a non-HA `test` environment; Burstable cannot do zone-redundant HA, so production does not use it |
 | Container Apps | 2 API + 2 worker replicas always on, plus the occasional job | Replica minimums are the floor of the availability promise; do not lower them in production |
 | Log Analytics | Ingestion by volume, retention beyond the included period | `log_retention_days`, and not logging statements or bodies |
-| Container Registry | Standard SKU, flat daily rate, storage | Prune old digests |
+| Front Door | Premium has a monthly base fee that is several times Standard's, plus requests and data out | `private_ingress = false` and `waf_managed_rules = false` (dev) bring back Standard |
+| Container Registry | Premium (private endpoint, zone redundancy, geo-replication) flat daily rate, plus the build agent pool, which bills while it exists | Prune old digests; `private_data_plane = false` (dev) is Standard with no pool |
+| Network | One NAT gateway per region (hourly plus data), a private endpoint per service per region (hourly plus data) | Only as many regions as the RTO needs |
+| Second region | A database replica of the primary's size, an API replica, a NAT gateway, private endpoints; writers sit at zero | `dr_location = null` removes all of it |
 | Entra ID | Group-to-role assignment needs P1 (probably already licensed) | Assign roles to people if not |

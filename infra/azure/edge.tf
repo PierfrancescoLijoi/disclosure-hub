@@ -3,13 +3,18 @@
 # marks public reads cacheable for 30 seconds, the feed for 60) and a single rate rule keeps the subscription
 # form from being used to mail strangers. The local twin does the same with the nginx cache (apps/web/nginx.conf).
 #
-# Standard SKU has custom WAF rules only; the managed rule sets need Premium (see README, "What it costs").
+# Premium is what the managed WAF rule sets and Private Link to the origin need (README, "What it costs"); the
+# Standard tier remains for a dev environment that turns both off.
+
+locals {
+  edge_premium = var.private_ingress || var.waf_managed_rules
+}
 
 resource "azurerm_cdn_frontdoor_profile" "main" {
   count               = var.enable_front_door ? 1 : 0
   name                = "afd-${local.name}"
   resource_group_name = azurerm_resource_group.main.name
-  sku_name            = "Standard_AzureFrontDoor"
+  sku_name            = local.edge_premium ? "Premium_AzureFrontDoor" : "Standard_AzureFrontDoor"
   tags                = local.tags
 }
 
@@ -49,6 +54,18 @@ resource "azurerm_cdn_frontdoor_origin" "api" {
   https_port                     = 443
   priority                       = 1
   weight                         = 1000
+
+  # Private Link: Front Door asks for a private endpoint into the Container Apps environment. The connection
+  # waits for approval (scripts/approve-private-link.sh); until then the edge answers 502 and nothing is exposed.
+  dynamic "private_link" {
+    for_each = var.private_ingress ? [1] : []
+    content {
+      location               = azurerm_resource_group.main.location
+      private_link_target_id = azurerm_container_app_environment.main.id
+      target_type            = "managedEnvironments"
+      request_message        = "Front Door ${local.name}"
+    }
+  }
 }
 
 # Public reads: cached, compressed, one cache entry per query string (the filters are in it).
@@ -57,7 +74,7 @@ resource "azurerm_cdn_frontdoor_route" "public" {
   name                          = "public-reads"
   cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.main[0].id
   cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.api[0].id
-  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.api[0].id]
+  cdn_frontdoor_origin_ids      = concat([azurerm_cdn_frontdoor_origin.api[0].id], local.dr_origin_ids)
   patterns_to_match             = ["/api/public/*"]
   supported_protocols           = ["Http", "Https"]
   https_redirect_enabled        = true
@@ -79,7 +96,7 @@ resource "azurerm_cdn_frontdoor_route" "app" {
   name                          = "app"
   cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.main[0].id
   cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.api[0].id
-  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.api[0].id]
+  cdn_frontdoor_origin_ids      = concat([azurerm_cdn_frontdoor_origin.api[0].id], local.dr_origin_ids)
   patterns_to_match             = ["/*"]
   supported_protocols           = ["Http", "Https"]
   https_redirect_enabled        = true
@@ -95,6 +112,20 @@ resource "azurerm_cdn_frontdoor_firewall_policy" "main" {
   enabled             = true
   mode                = "Prevention"
   tags                = local.tags
+
+  # Microsoft's managed rules: the common web attacks (default rule set) and known bad bots. They start in
+  # Log so real traffic can be read before anything is blocked (README, "Turning the WAF to Block").
+  dynamic "managed_rule" {
+    for_each = var.waf_managed_rules ? {
+      Microsoft_DefaultRuleSet    = "2.1"
+      Microsoft_BotManagerRuleSet = "1.1"
+    } : {}
+    content {
+      type    = managed_rule.key
+      version = managed_rule.value
+      action  = var.waf_managed_rules_action
+    }
+  }
 
   custom_rule {
     name                           = "SubscribeRate"

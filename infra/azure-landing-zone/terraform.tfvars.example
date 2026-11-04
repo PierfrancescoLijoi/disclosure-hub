@@ -1,0 +1,19 @@
+# Copy to landing-zone.tfvars (ignored by git) and fill in. Nothing here is a secret.
+org              = "contoso"
+org_display_name = "Contoso"
+
+subscriptions = {
+  platform = ["00000000-0000-0000-0000-000000000001"]
+  prod     = ["00000000-0000-0000-0000-000000000002"] # Disclosure Hub prod
+  nonprod  = ["00000000-0000-0000-0000-000000000003"] # Disclosure Hub test
+}
+
+# Report first; set true after the compliance results have been read and cleaned up.
+enforce_policies = false
+
+allowed_locations = ["uksouth", "northeurope", "global"] # the second region of dr_location must be here
+
+rbac = {
+  platform_owners = { group_object_id = "00000000-0000-0000-0000-0000000000a1", role = "Owner", scope = "platform" }
+  security_reader = { group_object_id = "00000000-0000-0000-0000-0000000000a2", role = "Reader", scope = "org" }
+}

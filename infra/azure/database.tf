@@ -83,5 +83,34 @@ locals {
   database_url = {
     app     = "postgres://${azurerm_user_assigned_identity.app.name}@${azurerm_postgresql_flexible_server.main.fqdn}:5432/${azurerm_postgresql_flexible_server_database.hub.name}"
     migrate = "postgres://${azurerm_user_assigned_identity.migrate.name}@${azurerm_postgresql_flexible_server.main.fqdn}:5432/${azurerm_postgresql_flexible_server_database.hub.name}"
+    read    = var.read_replica ? "postgres://${azurerm_user_assigned_identity.app.name}@${azurerm_postgresql_flexible_server.read[0].fqdn}:5432/${azurerm_postgresql_flexible_server_database.hub.name}" : null
   }
+}
+
+# Public reads (the archive, search, the feed) are cached at the edge, so a copy that is seconds behind is
+# invisible to readers and takes that load off the primary (the api sends public reads there when
+# READ_DATABASE_URL is set). Off by default: turn it on when the CPU alert fires on public traffic (docs/adr/0001).
+resource "azurerm_postgresql_flexible_server" "read" {
+  # checkov:skip=CKV2_AZURE_57: VNet-integrated like the primary: no public endpoint.
+  # lint:allow protect a replica holds nothing the primary does not; it is recreated from the primary.
+  count               = var.read_replica ? 1 : 0
+  name                = "psql-${local.unique}-read"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  create_mode         = "Replica"
+  source_server_id    = azurerm_postgresql_flexible_server.main.id
+  sku_name            = var.postgres_sku
+  storage_mb          = var.postgres_storage_mb
+  auto_grow_enabled   = true
+  tags                = local.tags
+
+  delegated_subnet_id           = azurerm_subnet.postgres.id
+  private_dns_zone_id           = azurerm_private_dns_zone.postgres.id
+  public_network_access_enabled = false
+
+  lifecycle {
+    ignore_changes = [zone]
+  }
+
+  depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
 }

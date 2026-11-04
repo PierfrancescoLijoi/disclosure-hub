@@ -1,6 +1,11 @@
 # Build once, promote by digest. Signs in to Azure with a federated credential (no stored secret).
 # NOT RUN YET: written against the documented behaviour of the actions and the Azure CLI. First use is
 # listed in infra/azure/README.md; set the repository variables below in the GitHub environment.
+#
+# The registry has no public endpoint (private_data_plane), so the image is built by ACR Tasks in an agent pool
+# inside the network (`az acr build --agent-pool`), not pushed from this runner. Nothing here reaches the
+# registry, the vault or the container environment directly: only Azure Resource Manager and the Front Door
+# address, which is why the smoke test goes through the edge.
 name: azure-deploy
 
 on:
@@ -13,25 +18,13 @@ on:
         default: test
 
 permissions:
-  id-token: write # request the OIDC token for the federated credential
   contents: read
 
 jobs:
-  deploy:
+  # No cloud identity here: the dependency install runs third-party scripts, which must not be able to ask for a
+  # token. (Pin the actions below by commit SHA when the repository adopts a pinning policy.)
+  test:
     runs-on: ubuntu-latest
-    # The GitHub environment name must equal the Terraform environment: the federated credential's
-    # subject is repo:<owner>/<name>:environment:<name>. Add required reviewers on prod.
-    environment: ${{ inputs.environment }}
-    concurrency: azure-${{ inputs.environment }}
-    env:
-      # From `terraform output` after the first apply; stored as environment variables, none is secret.
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
-      REGISTRY: ${{ vars.REGISTRY_LOGIN_SERVER }}
-      MIGRATE_JOB: ${{ vars.MIGRATE_JOB }}
-      WORKLOAD: dhub
     steps:
       - uses: actions/checkout@v4
 
@@ -46,24 +39,65 @@ jobs:
           npm run typecheck
           npm test
 
+  deploy:
+    needs: test
+    # prod only from main; add required reviewers on the GitHub environment too
+    if: ${{ inputs.environment != 'prod' || github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # request the OIDC token for the federated credential
+      contents: read
+    # The GitHub environment name must equal the Terraform environment: the federated credential's
+    # subject is repo:<owner>/<name>:environment:<name>. Add required reviewers on prod.
+    environment: ${{ inputs.environment }}
+    concurrency: azure-${{ inputs.environment }}
+    env:
+      # From `terraform output` after the first apply; stored as environment variables, none is secret.
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      # Set only when dr_location is used: the second region's resource group (output resource_group_dr).
+      RESOURCE_GROUP_DR: ${{ vars.RESOURCE_GROUP_DR }}
+      REGISTRY: ${{ vars.REGISTRY_LOGIN_SERVER }}
+      # Output build_agent_pool; empty for a dev environment with a public registry.
+      BUILD_AGENT_POOL: ${{ vars.BUILD_AGENT_POOL }}
+      MIGRATE_JOB: ${{ vars.MIGRATE_JOB }}
+      # Output app_url: the Front Door address.
+      APP_URL: ${{ vars.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: azure/login@v2
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build and push the image (once; the digest is what gets deployed)
+      - name: Build the image in the registry's agent pool (once; the digest is what gets deployed)
         id: image
         run: |
-          az acr login --name "${REGISTRY%%.*}"
-          docker build -t "$REGISTRY/hub-server:${GITHUB_SHA}" .
-          docker push "$REGISTRY/hub-server:${GITHUB_SHA}"
-          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/hub-server:${GITHUB_SHA}")
-          echo "ref=$DIGEST" >> "$GITHUB_OUTPUT"
+          NAME="${REGISTRY%%.*}"
+          POOL=()
+          [ -n "${BUILD_AGENT_POOL:-}" ] && POOL=(--agent-pool "$BUILD_AGENT_POOL")
+          # Queue the build and read its run id; polling the run is a management-plane call, so it works
+          # while the registry's data plane is private.
+          RUN=$(az acr build --registry "$NAME" "${POOL[@]}" --image "hub-server:${GITHUB_SHA}" --no-logs --query runId -o tsv .)
+          for i in $(seq 1 90); do
+            STATUS=$(az acr task show-run --registry "$NAME" --run-id "$RUN" --query status -o tsv)
+            case "$STATUS" in
+              Succeeded) break ;;
+              Failed|Canceled|Error|Timeout) az acr task logs --registry "$NAME" --run-id "$RUN" || true; echo "build $STATUS"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          [ "$STATUS" = Succeeded ] || { echo "build did not finish in 15 minutes"; exit 1; }
+          DIGEST=$(az acr task show-run --registry "$NAME" --run-id "$RUN" --query "outputImages[0].digest" -o tsv)
+          echo "ref=$REGISTRY/hub-server@$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Migrate the database (the job fails the deployment if a migration fails)
         run: |
-          az containerapp job update -g "$RESOURCE_GROUP" -n "$MIGRATE_JOB" --image "${{ steps.image.outputs.ref }}"
+          az containerapp job update -g "$RESOURCE_GROUP" -n "$MIGRATE_JOB" --image "${{ steps.image.outputs.ref }}" -o none
           EXECUTION=$(az containerapp job start -g "$RESOURCE_GROUP" -n "$MIGRATE_JOB" --query name -o tsv)
           for i in $(seq 1 60); do
             STATUS=$(az containerapp job execution show -g "$RESOURCE_GROUP" -n "$MIGRATE_JOB" --job-execution-name "$EXECUTION" --query properties.status -o tsv)
@@ -75,18 +109,14 @@ jobs:
           done
           echo "migration did not finish in 10 minutes"; exit 1
 
-      - name: Roll out every container app (api, worker and each event consumer set; a new revision replaces the old one only when it is ready)
+      - name: Roll out every container app, both regions (a new revision replaces the old one only when it is ready)
         run: |
           # Every container app in the resource group runs this image; the migrate job is a different resource type.
-          for APP in $(az containerapp list -g "$RESOURCE_GROUP" --query "[].name" -o tsv); do
-            az containerapp update -g "$RESOURCE_GROUP" -n "$APP" --image "${{ steps.image.outputs.ref }}"
+          for RG in "$RESOURCE_GROUP" ${RESOURCE_GROUP_DR:-}; do
+            for APP in $(az containerapp list -g "$RG" --query "[].name" -o tsv); do
+              az containerapp update -g "$RG" -n "$APP" --image "${{ steps.image.outputs.ref }}" -o none # not the JSON: it carries env values
+            done
           done
 
-      - name: Smoke test
-        run: |
-          FQDN=$(az containerapp show -g "$RESOURCE_GROUP" -n "ca-${WORKLOAD}-${{ inputs.environment }}-api" --query properties.configuration.ingress.fqdn -o tsv)
-          for i in $(seq 1 30); do
-            curl -fsS "https://$FQDN/readyz" && exit 0
-            sleep 10
-          done
-          echo "api never became ready"; exit 1
+      - name: Smoke test through the edge (infra/azure/scripts/smoke.sh)
+        run: bash infra/azure/scripts/smoke.sh "$APP_URL"

@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { AdvisoryAgent } from '../src/application/agents.js';
 import { EVENT } from '../src/domain/events.js';
 import type { Consumer } from '../src/ports/index.js';
-import { FakeClock, fx, makeEnv, publishAnnouncement, type Env } from './helpers.js';
+import { pruneOutbox } from '../src/runtime.js';
+import { FakeClock, fx, makeEnv, publishAnnouncement, silent, type Env } from './helpers.js';
 
 let env: Env | undefined;
 afterEach(async () => {
@@ -109,6 +110,31 @@ describe('event outbox and reactor', () => {
     const row = (await env.rt.store.read.events.forAggregate(id)).find((r) => r.consumer === 'probe' && r.status === 'dead')!;
     expect(row).toBeDefined();
     expect(row.lastError).toContain('gave up');
+  });
+
+  it('prunes delivered events after the retention window and keeps dead and waiting ones for a person', async () => {
+    const clock = new FakeClock(new Date('2026-11-03T10:00:00Z'));
+    const broken = probe([], { id: 'broken', async handle() { throw new Error('always'); } });
+    env = await makeEnv({ clock, consumers: [probe([]), broken], env: { REACTOR_MAX_ATTEMPTS: '1' } });
+    const id = await publishAnnouncement(env);
+    clock.advance(30 * 86_400_000);
+    // Delivered recently: inside the retention window, so it stays whatever else is removed.
+    const young = await publishAnnouncement(env);
+    // A fresh event nobody has handled yet must survive, however old the rest is.
+    await env.rt.store.tx((tx) => env!.rt.events.emit(tx, { type: EVENT.published, issuerId: 'northwind', aggregateId: id, payload: {} }));
+    const before = await env.rt.db.selectFrom('event_deliveries').select('status').execute();
+    expect(before.some((r) => r.status === 'done')).toBe(true);
+
+    const removed = await pruneOutbox(env.rt.store, clock, 14, silent);
+    expect(removed).toBeGreaterThan(0);
+    const after = await env.rt.db.selectFrom('event_deliveries').select('status').execute();
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((r) => r.status === 'dead' || r.status === 'pending' || r.status === 'done')).toBe(true);
+    expect((await env.rt.store.read.events.forAggregate(young)).some((r) => r.status === 'done')).toBe(true);
+    expect((await env.rt.store.read.events.forAggregate(id)).some((r) => r.status === 'done')).toBe(false);
+    // The dead delivery's event is still there to be read.
+    expect((await env.rt.store.read.events.forAggregate(id)).some((r) => r.consumer === 'broken' && r.status === 'dead')).toBe(true);
+    expect(await pruneOutbox(env.rt.store, clock, 14, silent)).toBe(0); // nothing more to remove
   });
 
   it('runs only the consumers a process is told to run', async () => {

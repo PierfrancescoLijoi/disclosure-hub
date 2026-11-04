@@ -388,3 +388,53 @@ resource "azurerm_consumption_budget_resource_group" "main" {
     ignore_changes = [time_period]
   }
 }
+
+# The signals that say the database is becoming the bottleneck, in the order they appear. When the first stays
+# firing after queries and SKU have been looked at, move the event queue to Service Bus (docs/adr/0001).
+resource "azurerm_monitor_metric_alert" "postgres_cpu_sustained" {
+  name                = "${local.name}-postgres-cpu-sustained"
+  resource_group_name = azurerm_resource_group.main.name
+  scopes              = [azurerm_postgresql_flexible_server.main.id]
+  description         = "Database CPU above 60 % for 6 hours. Look at the slow-statement log, then the SKU, then docs/adr/0001 (read replica for public reads, Service Bus for events)."
+  severity            = 3
+  frequency           = "PT1H"
+  window_size         = "PT6H"
+  tags                = local.tags
+
+  criteria {
+    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+    metric_name      = "cpu_percent"
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 60
+  }
+
+  action {
+    action_group_id = local.alert_common.action_group
+  }
+}
+
+# How far the second region is behind: that gap is the data lost if the primary region is lost now (the RPO).
+resource "azurerm_monitor_metric_alert" "postgres_replica_lag" {
+  count               = var.dr_location == null ? 0 : 1
+  name                = "${local.name}-postgres-dr-replica-lag"
+  resource_group_name = azurerm_resource_group.main.name
+  scopes              = [azurerm_postgresql_flexible_server.dr[0].id]
+  description         = "The second-region replica is more than 5 minutes behind: the data a regional failover would lose is growing."
+  severity            = 2
+  frequency           = "PT5M"
+  window_size         = "PT15M"
+  tags                = local.tags
+
+  criteria {
+    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+    metric_name      = "physical_replication_delay_in_seconds"
+    aggregation      = "Maximum"
+    operator         = "GreaterThan"
+    threshold        = 300
+  }
+
+  action {
+    action_group_id = local.alert_common.action_group
+  }
+}

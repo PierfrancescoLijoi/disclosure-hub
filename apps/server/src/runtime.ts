@@ -36,6 +36,8 @@ export interface Runtime {
   subscriptions: SubscriptionService;
   /** The demo mailbox: only with EMAIL_TRANSPORT=log. */
   mailbox: LogChannel | undefined;
+  /** The read replica for public reads; undefined when READ_DATABASE_URL is not set. */
+  publicRead: Store | undefined;
   /** Undefined when AI_PROVIDER=off: the rest of the system never needs it. */
   preCheck: PreCheckService | undefined;
   log: Logger;
@@ -70,6 +72,25 @@ const write = (level: string) => (obj: object | string, msg?: string) => {
 const describeErrors = (o: object) =>
   Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v instanceof Error ? v.message : v]));
 
+const PRUNE_BATCH = 1000;
+
+/** Deletes in batches until a pass finds less than a batch, so one run cannot hold the table for long. */
+export async function pruneOutbox(store: Store, clock: Clock, retentionDays: number, log: Logger): Promise<number> {
+  const before = new Date(clock.now().getTime() - retentionDays * 86_400_000).toISOString();
+  let total = 0;
+  try {
+    for (;;) {
+      const { deliveries, events } = await store.read.events.prune(before, PRUNE_BATCH);
+      total += deliveries + events;
+      if (deliveries < PRUNE_BATCH && events < PRUNE_BATCH) break;
+    }
+    if (total > 0) log.info({ removed: total, olderThan: before }, 'outbox pruned');
+  } catch (err) {
+    log.error({ err }, 'outbox prune failed');
+  }
+  return total;
+}
+
 export const consoleLogger: Logger = { info: write('info'), warn: write('warn'), error: write('error') };
 
 export async function createRuntime(config: Config, o: RuntimeOverrides = {}): Promise<Runtime> {
@@ -84,6 +105,9 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
   }
 
   const store = createStore(db);
+  // Public reads may go to a replica: they are cached at the edge, so its lag (seconds) is invisible and the primary keeps its capacity for writes.
+  const readConnection = config.READ_DATABASE_URL && !o.connection ? connect(config.READ_DATABASE_URL, config.DATABASE_AUTH) : undefined;
+  const publicRead = readConnection ? createStore(readConnection.db) : undefined;
   const policies = o.policies ?? defaultPolicies();
   const gateways = o.gateways ?? new GatewayRegistry().register(new MockRnsGateway(db, clock)).register(new MockEdgarGateway(db, clock));
   const queue =
@@ -119,7 +143,7 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
       enforceWindows: config.ENFORCE_WINDOWS,
     },
   });
-  const announcements = new AnnouncementService({ store, policies, clock, queue, maxAttempts: config.MAX_ATTEMPTS, log, events });
+  const announcements = new AnnouncementService({ store, policies, clock, queue, maxAttempts: config.MAX_ATTEMPTS, log, events, publicRead });
   const provider = createPreCheckProvider(config);
   const preCheck = provider && new PreCheckService({ store, policies, clock, provider, log });
 
@@ -136,7 +160,7 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
   const tokenKey = config.READER_TOKEN_KEY ?? 'demo-reader-token-key-not-for-production-use';
   const baseUrl = config.PUBLIC_BASE_URL.replace(/\/$/, '');
   const subscriptions = new SubscriptionService({ store, policies, channels, clock, log, config: { baseUrl, tokenKey, allowPrivateWebhooks: config.WEBHOOK_ALLOW_PRIVATE } });
-  consumers.register(notifierConsumer({ store, channels, subscriptions, clock, log, baseUrl, tokenKey }));
+  consumers.register(notifierConsumer({ store, events, channels, subscriptions, clock, log, baseUrl, tokenKey, chunk: config.NOTIFY_CHUNK, budgetMs: config.LEASE_MS / 4 }));
 
   // Agents are consumers with guardrails: the pre-check is the first, anything passed in is the next.
   const autorun = (config.AGENTS ?? (config.AI_PROVIDER === 'mock' ? 'precheck' : '')).split(',').map((s) => s.trim()).filter(Boolean);
@@ -164,6 +188,7 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
   let sweeper: NodeJS.Timeout | undefined;
   let poller: NodeJS.Timeout | undefined;
   let outboxReport: NodeJS.Timeout | undefined;
+  let outboxPrune: NodeJS.Timeout | undefined;
   let draining: Promise<void> | undefined;
   return {
     config,
@@ -178,6 +203,7 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
     consumers,
     subscriptions,
     mailbox,
+    publicRead,
     preCheck,
     log,
     async start() {
@@ -211,14 +237,22 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
           );
         outboxReport = setInterval(report, OUTBOX_REPORT_MS);
         outboxReport.unref();
+        // Delivered events are history nobody reads: without this the outbox tables only grow. Every events process may run it (deletes are idempotent).
+        if (config.OUTBOX_PRUNE_MS > 0 && config.OUTBOX_RETENTION_DAYS > 0) {
+          const prune = () => pruneOutbox(store, clock, config.OUTBOX_RETENTION_DAYS, log);
+          outboxPrune = setInterval(prune, config.OUTBOX_PRUNE_MS);
+          outboxPrune.unref();
+        }
       }
     },
     async close() {
       if (sweeper) clearInterval(sweeper);
       if (poller) clearInterval(poller);
       if (outboxReport) clearInterval(outboxReport);
+      if (outboxPrune) clearInterval(outboxPrune);
       await draining; // let a pass in flight finish before the database goes away
       await queue.close();
+      await publicRead?.close();
       await store.close();
     },
   };

@@ -10,7 +10,10 @@ state machine are identical; environment variables choose the adapters.
 | `api`, `worker` | Container Apps `api` and `worker`, two replicas minimum, zone-redundant environment | No cluster to run; scale on the real signal; the worker has no ingress |
 | `notifier`, `agents` (`ROLE=events`) | One Container App per entry of `consumer_sets` (`events.tf`), no ingress, one replica minimum | The extension seam: each consumer set drains the shared event outbox on its own, so a slow mail service or a costly model cannot slow publishing or each other. A new agent is one more map entry |
 | `mailpit` (SMTP sink) | Azure Communication Services Email, Azure-managed sender domain, sent with the app's managed identity (`readers.tf`) | No SMTP password or connection string exists; the same code sends through SMTP locally and through the Email REST API here |
-| nginx cache on `/api/public` | Front Door Standard: cached public routes, one WAF rate rule on the subscription form (`edge.tf`) | The archive and the Atom feed are read by crowds after a big announcement; the origin and the database see one request per cache lifetime |
+| nginx cache on `/api/public` | Front Door **Premium**: cached public routes, managed WAF rule sets (default rules 2.1, bot manager 1.1; Log first) and a rate rule on the subscription form, Private Link to the environment (`edge.tf`) | The archive and the Atom feed are read by crowds after a big announcement; the origin and the database see one request per cache lifetime. Premium is what managed rules and a private origin need |
+| (not applicable) | Private network (`network.tf`, `registry.tf`, `keyvault.tf`): the environment has no public address, registry (Premium) and vault have private endpoints and no public access, builds run in a registry agent pool, outbound leaves through one NAT gateway | Nothing reaches the apps except through the edge; the registry and the vault are not on the internet; one known egress address |
+| (not applicable) | Second region (`dr.tf`, off unless `dr_location` is set): database read replica, registry geo-replica, standby API, writers at zero, Front Door fallback origin | A regional loss costs a decision and about 15 minutes (design figure), not a restore from backup. `docs/DR.md` |
+| (not applicable) | `infra/azure-landing-zone`: management groups, policy assignments (report first), RBAC by group | Governance belongs to the tenant, not to a workload; a separate root with its own state |
 | `READER_TOKEN_KEY` in env (dev only) | Key Vault secret `reader-token-key`, referenced by the api and the consumer sets | Confirmation, unsubscribe and webhook-signing secrets derive from it; created out of band like every secret here |
 | `migrate` | Container Apps job `migrate`, started by the pipeline before each rollout | The schema owner is a different identity from the runtime |
 | `web` (nginx) | Served by the API container behind the platform ingress (TLS) | One fewer moving part |
@@ -26,8 +29,8 @@ Sizing and the reasons behind it: [`docs/SIZING.md`](../../docs/SIZING.md). Arch
 **Verified here, without an Azure subscription** (`bash scripts/verify.sh`, needs Docker; also runs in CI):
 
 - `terraform fmt`, `init`, `validate` against the real provider schemas (azurerm 4.81, azuread 3.10): every argument exists and has a valid value.
-- `terraform test` with mocked providers: 24 runs that assert the security and resilience properties the design depends on (database private, Entra-only, zone-redundant, locked; registry and vault without stored credentials; two replicas minimum; `AUTH_MODE=oidc`, `DEMO=0`; only the application subnet reaches the database; PKCE-only browser app; one assignment per mapped group; each consumer set is its own app with no ingress, no scale-to-zero and no plain-text secret; a new agent is one map entry and changes nothing else; mail goes through the managed identity with no SMTP password; only public reads are cached and the WAF blocks; with Front Door or mail switched off the right resources and settings disappear; bad input is refused). A deliberate change to one of those properties makes a test fail (checked). Validation against the real provider schema also caught an invalid Front Door compression type before any deploy.
-- `tflint` (azurerm ruleset), `trivy config` (no findings; one intended internet-facing rule is annotated) and `checkov` (21 passed, 9 skipped, each skip carries its reason in the code: Premium-only registry features, a private endpoint where a firewall or VNet integration already does the job).
+- `terraform test` with mocked providers: 41 runs here (7 more for the landing zone) that assert the security and resilience properties the design depends on (private registry, vault and environment; Premium edge with managed rules in Log mode and a private origin; the cheap development configuration; the second region as a replica with writers at zero and a lower-priority Front Door origin; a read replica that is opt-in and wired to the api only; database private, Entra-only, zone-redundant, locked; registry and vault without stored credentials; two replicas minimum; `AUTH_MODE=oidc`, `DEMO=0`; only the application subnet reaches the database; PKCE-only browser app; one assignment per mapped group; each consumer set is its own app with no ingress, no scale-to-zero and no plain-text secret; a new agent is one map entry and changes nothing else; mail goes through the managed identity with no SMTP password; only public reads are cached and the WAF blocks; with Front Door or mail switched off the right resources and settings disappear; bad input is refused). A deliberate change to one of those properties makes a test fail (checked). Validation against the real provider schema also caught an invalid Front Door compression type before any deploy.
+- `tflint` (azurerm ruleset), `trivy config` (no findings; the one internet-facing rule exists only when `private_ingress` is off) and `checkov` (each skip carries its reason in the code). The landing zone has its own `scripts/verify.sh` with the same checks.
 - The application side of the same contract, run locally: OIDC verification against a JWKS (unit tests and real Keycloak), the PostgreSQL queue including a listener reconnect, the migrate/api/worker split, and the load profile in `docs/SIZING.md`.
 
 **Not verified: nothing here was applied.** No subscription was used. These are the things that can only be proven on the
@@ -50,6 +53,15 @@ first deploy; each has an owner step below.
 | 13 | A Key Vault reference works for `reader-token-key` in the api and in every consumer set | Create the secret (below), apply; a container app that cannot read it fails to start, which is loud |
 | 14 | Outbox lag and dead-delivery alerts fire (log fields `oldestPendingSeconds`, `dead`) | Stop a consumer set for 10 minutes while publishing; revoke the mail role for a few retries and watch the dead alert |
 | 15 | The api answers only requests that carry the Front Door id (`EDGE_ID` = the profile's `resource_guid`, compared with `X-Azure-FDID`, which Front Door adds to every origin request); probes are exempt. Direct calls to the container app address get 403, so the WAF rule and cache cannot be skipped | `curl` the container app address directly (expect 403) and through the edge (expect 200); if Front Door does not send the header as documented, the whole site answers 403: unset `EDGE_ID` on the api to recover. The web app origin is not restricted (static files, no data) |
+| 16 | Front Door reaches the Container Apps environment over Private Link: the connection appears as Pending and is approved by `scripts/approve-private-link.sh` (the REST api-version may differ: `PRIVATE_LINK_API_VERSION`); the environment accepts it with `public_network_access = "Disabled"` | After the apply: run the script, wait a few minutes, `smoke.sh <edge> <direct address>`: 200 through the edge, unreachable directly. 502 from the edge means the connection is not approved |
+| 17 | `X-Azure-FDID` equals the profile's `resource_guid` and arrives as documented. `EDGE_ID_MODE` starts at `log`: nothing is refused, mismatches are logged | `smoke.sh` with `LOG_WORKSPACE_ID`: zero requests without the id after real traffic, then set `edge_id_mode = "enforce"`. Even before that, the network blocks the direct path (item 16) |
+| 18 | A NAT gateway on the Container Apps subnet gives the workload-profile environment its outbound address, including to the registry's and the vault's private endpoints (which do not use it) | Read `egress_ip` and call a test URL from a container; pull an image; read a secret |
+| 19 | The registry agent pool builds from `az acr build --agent-pool` while the registry has no public endpoint, and the run's digest is readable from the management plane (`az acr task show-run`) | Run the deploy workflow for `test`; the build and the digest step succeed |
+| 20 | Container Apps resolves Key Vault references through the vault's private endpoint and the linked private DNS zone | The apps start (a failed reference fails the start) |
+| 21 | The WAF's managed rules do not block legitimate traffic: Log first, read `FrontDoorWebApplicationFirewallLog` for a week, add exclusions, then `waf_managed_rules_action = "Block"` | See "Turning the WAF to Block" |
+| 22 | The second region: the replica is created over the peered networks, the application identity can sign in to the replica (Entra administrators and roles carry over; if not, `dr-failover.sh` re-adds the administrator), promotion works, the standby API passes its probe against a read-only database, writers start from zero | A rehearsal in `test` (`docs/DR.md`), times recorded there |
+| 23 | The landing zone: built-in policy definitions are found by display name at plan time (a wrong name fails the plan), management group association works for the chosen subscriptions | `terraform plan` in `infra/azure-landing-zone`; policies stay in report-only mode until compliance has been read |
+| 24 | Sizing on Azure: what the edge and the origin serve to a crowd, database CPU under it | `infra/azure/loadtest/public-read.mjs`, `docs/SIZING.md` table |
 
 ## Before the first apply
 
@@ -59,7 +71,7 @@ first deploy; each has an owner step below.
 4. **An Entra group for database administration** (`dba_group_object_id`). Password sign-in is disabled, so without it nobody can create database roles.
 5. **Quota and region.** The region must have availability zones. Check Container Apps and `GP_Standard_D2ds_v5` quota in it.
 6. Copy `terraform.tfvars.example` to `<environment>.tfvars` and fill it in.
-7. **The reader token key.** After stage 1 below, put 32 or more random characters in the vault as `reader-token-key` (the name is `reader_token_secret_name`), the same way as the provider key: from the Azure CLI, with a temporary firewall rule for your address, removed afterwards. Rotating it makes unsubscribe links already sent stop working, so rotate deliberately.
+7. **The reader token key.** After stage 1 below, put 32 or more random characters in the vault as `reader-token-key` (the name is `reader_token_secret_name`), the same way as the provider key. The apps cannot be created without that secret (a Key Vault reference is read at creation), and the vault is closed to the internet (`private_data_plane`): set `key_vault_allowed_ips` to your address in the first apply (stage 1), add the secret from that address, apply stage 4, then empty the list and apply again. Under an enforced landing-zone policy for vault public access, add an exemption for that hour. Rotating it makes unsubscribe links already sent stop working, so rotate deliberately.
 8. Register `Microsoft.Communication` and `Microsoft.Cdn` as well when using reader email and Front Door.
 
 ## Apply in stages
@@ -76,24 +88,53 @@ terraform apply -var-file=prod.tfvars \
   -target=azurerm_postgresql_flexible_server_database.hub -target=azurerm_postgresql_flexible_server_active_directory_administrator.dba \
   -target=azurerm_user_assigned_identity.app -target=azurerm_user_assigned_identity.migrate
 # 2. database roles: run scripts/bootstrap-roles.sql (see its header) from inside the network
-# 3. push a first image (the deploy workflow does it; or docker push to registry_login_server)
+# 3. nothing to push yet: the apps start on a placeholder image (api_image); the first real image is built by the workflow in step 5
 # 4. the rest
 terraform apply -var-file=prod.tfvars
-# 5. migrate, then roll out: run the azure-deploy workflow, then re-run the REVOKE at the bottom of bootstrap-roles.sql
+#    then approve the Private Link connection(s) Front Door opened (once per region):
+bash scripts/approve-private-link.sh "$(terraform output -raw resource_group)"   # add $(terraform output -raw resource_group_dr) with dr_location
+# 5. migrate, then roll out: run the azure-deploy workflow (it builds in the agent pool, migrates, rolls out, smoke-tests through the edge),
+#    then re-run the REVOKE at the bottom of bootstrap-roles.sql
 ```
 
-Use `terraform output` for the values the workflow needs (`registry_login_server`, `migrate_job`, `deploy_identity_client_id`, `tenant_id`, `resource_group`).
+Use `terraform output` for the values the workflow needs (`registry_login_server`, `build_agent_pool`, `migrate_job`, `deploy_identity_client_id`, `tenant_id`, `resource_group`, `resource_group_dr`, `app_url`).
+
+### Turning the edge id and the WAF from watching to enforcing
+
+Both start in a mode that cannot lock people out, because neither has been seen working on Azure:
+
+1. `edge_id_mode = "log"` (default). After real traffic has passed through Front Door, `LOG_WORKSPACE_ID=$(terraform output -raw log_workspace_id) bash scripts/smoke.sh <app_url>` reports whether any request arrived without the right `X-Azure-FDID`. Zero: set `edge_id_mode = "enforce"` and apply.
+2. `waf_managed_rules_action = "Log"` (default). Read the WAF log for a week of normal use, including staff signing in and posting announcements:
+   `AzureDiagnostics`-style queries on `FrontDoorWebApplicationFirewallLog` (category enabled in `edge.tf`). Add exclusions for what legitimate traffic trips, then set `"Block"` and apply.
+
+The network already refuses the direct path (Private Link), so neither is the only lock.
 The `api_image` variable defaults to a placeholder image so the first apply succeeds; after that the pipeline owns the image and Terraform ignores changes to it.
+
+## What it costs
+
+No price is quoted here (they change and differ by agreement); `docs/SIZING.md` section 6 lists the drivers and the
+pricing calculator turns them into a figure. What the private and resilient setup adds over the earlier one:
+
+- **Front Door Premium** has a monthly base fee that is several times Standard's. It is the largest new line.
+- **Container Registry Premium** (flat daily rate) and the **build agent pool**, which bills while it exists whether or
+  not anything is building.
+- **NAT gateway** (hourly plus data) and **private endpoints** (hourly plus data each: registry and vault, and again in
+  the second region).
+- **A second region** (`dr_location`): a database replica of the primary's size, an API replica, a NAT gateway and
+  private endpoints. Writers sit at zero.
+
+`monthly_budget_eur` defaults to 600: a production environment with the Premium edge will need more, so set it from the
+calculator, not from the default. For a development environment set `private_data_plane`, `private_ingress` and
+`waf_managed_rules` to `false`: Standard registry and edge, public with identities only, no NAT, no endpoints, no pool.
 
 ## Not included, and when to add it
 
 | Missing | Add it when |
 |---|---|
-| WAF managed rules, a custom domain on Front Door, a customer mail domain | Front Door is on (Standard: custom rules only, no managed rule sets, default `*.azurefd.net` address). Premium (managed rules, private origin) costs several times more; a custom domain and mail domain need DNS records the platform team owns. |
+| A custom domain on Front Door, a customer mail domain | Both need DNS records the platform team owns. Front Door answers on its default `*.azurefd.net` address until then. |
 | Service Bus for the event outbox | Events leave the single database: a consumer outside this system, or more than a few hundred events a second. Consumers are behind a port, so the swap is an adapter plus an outbox relay, not a rewrite. |
-| Private endpoints for the registry and the vault | Security policy forbids their public endpoints. Needs ACR Premium and self-hosted pipeline runners. Today: registry has no anonymous or admin access, vault firewall admits only the application subnet. |
-| Egress firewall | Policy requires an allow-list of outbound destinations. The container subnet's outbound is unrestricted; the database subnet accepts only the application subnet. |
-| A second region | An RTO shorter than "restore from geo-redundant backup in the paired region" (hours) is required. The queue is the database, so a warm standby is a read replica plus a second container environment. |
+| Egress filtering | Policy requires an allow-list of outbound destinations. Outbound leaves through one NAT gateway (one known address) and is not filtered; filtering is Azure Firewall in the hub of a landing zone, with a route table on the container subnet. |
+| Automatic regional failover | Never by a probe alone: promoting the replica is irreversible and a false positive means two writers. Reads fail over by themselves; writes by `scripts/dr-failover.sh`, a decision (`docs/DR.md`). |
 | Tracing / Application Insights | A real gateway adds latency worth attributing. Logs, `/metrics` and the failure alert cover the current needs. |
-| Landing zone, Policy, Defender for Cloud | These belong to the subscription, not to this workload; the tag rules (`owner`, `cost_centre`) and locks follow the CAF landing-zone conventions. |
+| Defender for Cloud plans, a hub network, central logging across subscriptions | Platform subscription concerns; `infra/azure-landing-zone` gives them a place (management groups, policy, RBAC) and leaves the hub and Defender to the platform team. |
 | Narrower deployment identity | Replace *Contributor on the resource group* with a custom role limited to updating the three container resources and pushing to the registry. |

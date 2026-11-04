@@ -7,6 +7,8 @@ export const EVENT = {
   submitted: 'announcement.submitted',
   published: 'announcement.published',
   agentReport: 'agent.report.created',
+  /** The notifier asking itself to carry on with the next chunk of followers. */
+  notifyContinue: 'reader.notify.continue',
 } as const;
 
 export interface DomainEvent {

@@ -25,3 +25,15 @@ role_groups = {
 #   notifier = { consumers = "notifier" }
 #   agents   = { consumers = "agent:precheck", agents = "precheck" }
 # }
+
+# Private network, edge and second region (the defaults are the safe production choice)
+# private_data_plane       = true     # Premium registry + vault behind private endpoints, NAT egress, build agent pool. false = dev
+# private_ingress          = true     # Front Door Premium over Private Link; the environment has no public address. false = dev
+# edge_id_mode             = "log"    # "enforce" after scripts/smoke.sh shows no request without X-Azure-FDID
+# waf_managed_rules        = true
+# waf_managed_rules_action = "Log"    # "Block" after a week of reading the WAF log
+# key_vault_allowed_ips    = []       # your address while creating the first secrets, then empty again
+# read_replica             = false    # public reads on a replica when the database CPU alert fires (docs/adr/0001)
+# dr_location              = "northeurope"   # second region; null = none. Check data residency (docs/DR.md)
+# dr_address_space         = "10.41.0.0/22"
+# monthly_budget_eur       = 1200     # the Premium edge, registry and a second region need a bigger budget than the default

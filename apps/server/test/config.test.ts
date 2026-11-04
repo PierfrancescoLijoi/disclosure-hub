@@ -21,6 +21,13 @@ describe('reader and event settings', () => {
     expect(loadConfig({ DEMO: '1', WEBHOOK_ALLOW_PRIVATE: '1' }).WEBHOOK_ALLOW_PRIVATE).toBe(true);
   });
 
+  it('takes a read replica only when it is PostgreSQL, and a mode for the edge id', () => {
+    expect(() => loadConfig({ ...prod, READER_TOKEN_KEY: KEY, READ_DATABASE_URL: 'sqlite:./x.db' })).toThrow(/READ_DATABASE_URL/);
+    expect(loadConfig({ ...prod, READER_TOKEN_KEY: KEY, READ_DATABASE_URL: 'postgres://u@replica/db' }).READ_DATABASE_URL).toContain('replica');
+    expect(loadConfig({ ...prod, READER_TOKEN_KEY: KEY }).EDGE_ID_MODE).toBe('enforce');
+    expect(() => loadConfig({ ...prod, READER_TOKEN_KEY: KEY, EDGE_ID_MODE: 'sometimes' })).toThrow();
+  });
+
   it('lets a process run only the consumers it names', () => {
     const c = loadConfig({ ...prod, ROLE: 'events', READER_TOKEN_KEY: KEY, REACTOR_CONSUMERS: 'notifier, agent:precheck' });
     expect(c.REACTOR_CONSUMERS.split(',').map((s) => s.trim())).toEqual(['notifier', 'agent:precheck']);

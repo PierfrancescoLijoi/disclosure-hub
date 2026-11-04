@@ -38,7 +38,10 @@ resource "azurerm_container_app_environment" "main" {
   logs_destination           = "log-analytics"
   infrastructure_subnet_id   = azurerm_subnet.aca.id
   zone_redundancy_enabled    = true
-  tags                       = local.tags
+  # No address on the internet: Front Door reaches the environment over Private Link (edge.tf). Disabling the
+  # public address is only safe with the edge in place, so the two are tied together.
+  public_network_access = var.private_ingress ? "Disabled" : "Enabled"
+  tags                  = local.tags
 
   workload_profile {
     name                  = "Consumption"
@@ -47,6 +50,11 @@ resource "azurerm_container_app_environment" "main" {
 
   lifecycle {
     ignore_changes = [infrastructure_resource_group_name]
+
+    precondition {
+      condition     = !var.private_ingress || var.enable_front_door
+      error_message = "private_ingress closes the environment to the internet and Front Door is the only way in: set enable_front_door = true too."
+    }
   }
 }
 
@@ -123,7 +131,8 @@ resource "azurerm_container_app" "api" {
           # reader: Front Door then the Container Apps ingress, or the ingress alone. Counted from the docs, not
           # observed: the first deploy checks it (README, "First apply").
           TRUST_PROXY = var.enable_front_door ? "2" : "1"
-        }, var.enable_front_door ? { EDGE_ID = azurerm_cdn_frontdoor_profile.main[0].resource_guid } : {})
+          }, var.enable_front_door ? { EDGE_ID = azurerm_cdn_frontdoor_profile.main[0].resource_guid, EDGE_ID_MODE = var.edge_id_mode } : {},
+        var.read_replica ? { READ_DATABASE_URL = local.database_url.read } : {})
         content {
           name  = env.key
           value = env.value
@@ -169,6 +178,18 @@ resource "azurerm_container_app" "api" {
       }
     }
   }
+
+  # Key Vault references and the image pull are checked when the app is created, so the access, the private
+  # path to the vault and the registry, and the outbound route must exist first.
+  depends_on = [
+    azurerm_role_assignment.app_vault_secrets,
+    azurerm_role_assignment.app_acr_pull,
+    azurerm_private_endpoint.vault,
+    azurerm_private_dns_zone_virtual_network_link.vault,
+    azurerm_private_endpoint.acr,
+    azurerm_private_dns_zone_virtual_network_link.acr,
+    azurerm_subnet_nat_gateway_association.aca,
+  ]
 
   lifecycle {
     # The deployment pipeline owns the image; Terraform owns everything around it.
@@ -243,6 +264,18 @@ resource "azurerm_container_app" "worker" {
       }
     }
   }
+
+  # Key Vault references and the image pull are checked when the app is created, so the access, the private
+  # path to the vault and the registry, and the outbound route must exist first.
+  depends_on = [
+    azurerm_role_assignment.app_vault_secrets,
+    azurerm_role_assignment.app_acr_pull,
+    azurerm_private_endpoint.vault,
+    azurerm_private_dns_zone_virtual_network_link.vault,
+    azurerm_private_endpoint.acr,
+    azurerm_private_dns_zone_virtual_network_link.acr,
+    azurerm_subnet_nat_gateway_association.aca,
+  ]
 
   lifecycle {
     ignore_changes = [template[0].container[0].image]

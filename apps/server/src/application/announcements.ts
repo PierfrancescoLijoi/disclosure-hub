@@ -35,6 +35,8 @@ export interface ServiceDeps {
   maxAttempts: number;
   log: Logger;
   events: EventBus;
+  /** Serves the public archive and feed, e.g. from a read replica. Defaults to `store`. */
+  publicRead?: Store;
 }
 
 export interface DraftInput {
@@ -454,16 +456,16 @@ export class AnnouncementService {
 
   /** Public reading of published announcements. Adds the channel and category labels the store does not know. */
   async publicFeed(q: PublicQuery) {
-    const { items, nextCursor } = await this.d.store.read.announcements.publicFeed(q);
+    const { items, nextCursor } = await (this.d.publicRead ?? this.d.store).read.announcements.publicFeed(q);
     return { items: items.map((i) => this.publicLabels(i)), nextCursor };
   }
 
   async publicIssuers() {
-    return this.d.store.read.announcements.publicIssuers();
+    return (this.d.publicRead ?? this.d.store).read.announcements.publicIssuers();
   }
 
   async publicGet(id: string) {
-    const item = await this.d.store.read.announcements.publicGet(id);
+    const item = await (this.d.publicRead ?? this.d.store).read.announcements.publicGet(id);
     if (!item) throw notFound('Announcement');
     return this.publicLabels(item);
   }

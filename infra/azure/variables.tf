@@ -308,3 +308,90 @@ variable "edge_subscribe_rate_limit_per_minute" {
     error_message = "edge_subscribe_rate_limit_per_minute must be at least 1."
   }
 }
+
+# ------------------------------------------------------------------ private network, edge, disaster recovery
+
+variable "private_data_plane" {
+  description = "Registry (Premium) and Key Vault reachable only through private endpoints, builds in a registry agent pool inside the network, outbound traffic through one NAT gateway with a known address. false keeps the cheaper public-with-firewall setup (dev)."
+  type        = bool
+  default     = true
+}
+
+variable "private_ingress" {
+  description = "Front Door Premium reaches the Container Apps environment over Private Link and the environment has no public address, so the only way in is the edge (and its WAF). Needs enable_front_door. The connection must be approved once: scripts/approve-private-link.sh."
+  type        = bool
+  default     = true
+}
+
+variable "key_vault_allowed_ips" {
+  description = "Public addresses that may reach the vault's data plane while private_data_plane is on (an operator creating the first secrets). Empty keeps the vault closed to the internet."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for ip in var.key_vault_allowed_ips : can(cidrhost(length(split("/", ip)) == 1 ? "${ip}/32" : ip, 0))])
+    error_message = "key_vault_allowed_ips entries must be IPv4 addresses or CIDR ranges."
+  }
+}
+
+variable "edge_id_mode" {
+  description = "log: a request without the right X-Azure-FDID is logged and served, so the header can be proven in the first deploy; enforce: it is refused with 403. Start with log, read the app log for 'edge id', then set enforce. With private_ingress the network already blocks the direct path, so this is a second lock."
+  type        = string
+  default     = "log"
+
+  validation {
+    condition     = contains(["log", "enforce"], var.edge_id_mode)
+    error_message = "edge_id_mode must be log or enforce."
+  }
+}
+
+variable "waf_managed_rules" {
+  description = "Attach Microsoft's managed rule sets (default rule set and bot manager) to the Front Door WAF. Needs the Premium tier, which this turns on."
+  type        = bool
+  default     = true
+}
+
+variable "waf_managed_rules_action" {
+  description = "Log first: read FrontDoorWebApplicationFirewallLog for a week against real traffic, add exclusions for false positives, then Block."
+  type        = string
+  default     = "Log"
+
+  validation {
+    condition     = contains(["Log", "Block"], var.waf_managed_rules_action)
+    error_message = "waf_managed_rules_action must be Log or Block."
+  }
+}
+
+variable "dr_location" {
+  description = "Second region for disaster recovery (null = none). A PostgreSQL read replica and the container apps run there, Front Door sends traffic to it only when the primary region fails its probe. Must be an availability-zone region and not the primary one."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dr_location == null || contains(["uksouth", "northeurope", "westeurope", "swedencentral", "francecentral", "germanywestcentral"], coalesce(var.dr_location, "x"))
+    error_message = "dr_location must be null or one of uksouth, northeurope, westeurope, swedencentral, francecentral, germanywestcentral."
+  }
+}
+
+variable "dr_address_space" {
+  description = "VNet CIDR of the second region: a /22 that overlaps neither address_space nor anything it is peered with."
+  type        = string
+  default     = "10.41.0.0/22"
+
+  validation {
+    condition     = can(cidrhost(var.dr_address_space, 0)) && tonumber(split("/", var.dr_address_space)[1]) == 22
+    error_message = "dr_address_space must be a /22."
+  }
+}
+
+variable "dr_postgres_sku" {
+  description = "SKU of the replica. It becomes the primary after a failover, so size it like the primary; null uses postgres_sku. A replica cannot have high availability until it is promoted."
+  type        = string
+  default     = null
+}
+
+variable "read_replica" {
+  description = "Run a second PostgreSQL replica in the primary region for the public reads (READ_DATABASE_URL). Turn it on when the database CPU alert fires on public traffic (docs/adr/0001)."
+  type        = bool
+  default     = false
+}

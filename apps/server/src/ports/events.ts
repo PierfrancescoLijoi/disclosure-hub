@@ -51,6 +51,8 @@ export interface EventsStore {
   /** Only the current lease holder may finish; false when the lease was lost. */
   complete(id: string, token: string, at: string): Promise<boolean>;
   fail(id: string, token: string, patch: { error: string; nextAttemptAt: string; dead: boolean }, at: string): Promise<boolean>;
+  /** Deletes finished deliveries older than `before`, then events no delivery refers to any more; dead and waiting ones stay. At most `limit` rows per table. */
+  prune(before: string, limit: number): Promise<{ deliveries: number; events: number }>;
   forAggregate(aggregateId: string): Promise<{ event: DomainEvent; consumer: string; status: DeliveryStatus; attempts: number; lastError: string | null }[]>;
 }
 

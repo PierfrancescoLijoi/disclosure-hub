@@ -224,4 +224,13 @@ export const migrations: Record<string, Migration> = {
       await sql`create unique index ai_reports_once_per_event on ai_reports (agent, event_id) where event_id is not null`.execute(db);
     },
   },
+
+  // The public archive lists published announcements newest first. Without this index every listing sorts every
+  // published announcement (local PostgreSQL, npm run bench:readers: 40 ms at 10,000 rows, 506 ms at 100,000); with it
+  // the first page reads 20 index entries (5 ms and 2 ms). Searching by word still scans the bodies (docs/SIZING.md).
+  '004_public_archive_order': {
+    async up(db: Kysely<any>) {
+      await sql`create index publications_published on publications (updated_at desc, announcement_id desc) where status = 'acked' and external_ref is not null`.execute(db);
+    },
+  },
 };

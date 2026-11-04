@@ -120,6 +120,35 @@ describe('following announcements by email', () => {
     expect(rows).toHaveLength(10);
   });
 
+  it('tells a large audience in chunks, each handled by its own delivery, so nobody is told twice or left out', async () => {
+    const { email, e, readers } = await start({ env: { NOTIFY_CHUNK: '2' } });
+    const people = ['a', 'b', 'c', 'd', 'e'].map((n) => `${n}@example.com`);
+    for (const p of people) await follow(email, readers, p);
+    await publishAnnouncement(e);
+    for (const p of people) expect(email.to(p).filter((m) => m.subject.startsWith('Northwind Energy plc:')), p).toHaveLength(1);
+    const continuations = await e.rt.db.selectFrom('domain_events').select('id').where('type', '=', 'reader.notify.continue').execute();
+    expect(continuations).toHaveLength(2); // 5 followers in chunks of 2, 2 and 1: a continuation after each full chunk
+    const open = await e.rt.db.selectFrom('event_deliveries').select('status').where('consumer', '=', 'notifier').execute();
+    expect(open.every((r) => r.status === 'done')).toBe(true);
+  });
+
+  it('keeps going past a follower that keeps failing: the next chunk is queued once, however often the first is retried', async () => {
+    const { email, e, readers } = await start({ env: { NOTIFY_CHUNK: '2' } });
+    const people = ['a', 'b', 'c', 'd', 'e'].map((n) => `${n}@example.com`);
+    for (const p of people) await follow(email, readers, p);
+    const before = email.sent.length;
+    email.failures.push('transient'); // one send in the first chunk fails once and is retried
+    await publishAnnouncement(e);
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await e.rt.reactor.drain();
+    }
+    const recipients = email.sent.slice(before).map((m) => m.to).sort();
+    expect(recipients).toEqual(people); // everybody once, including those behind the follower that failed
+    const continuations = await e.rt.db.selectFrom('domain_events').select('id').where('type', '=', 'reader.notify.continue').execute();
+    expect(continuations).toHaveLength(2); // retries of the first chunk did not queue it again
+  });
+
   it('accepts a bare address only, so a display name or separator cannot add recipients or dodge the cap', async () => {
     const { email, readers } = await start();
     for (const target of ['Foo<victim@example.com>', 'x,victim@example.com', 'a;b@example.com', '"x"@example.com', 'victim@example.com, other@example.com']) {

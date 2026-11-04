@@ -12,7 +12,8 @@
     "demo": "tsx src/demo.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "bench": "tsx src/bench.ts"
+    "bench": "tsx src/bench.ts",
+    "bench:readers": "tsx src/bench-readers.ts"
   },
   "dependencies": {
     "@azure/identity": "^4.14.1",

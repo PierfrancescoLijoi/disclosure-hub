@@ -157,7 +157,7 @@ Next steps for real scale: partitioning or archiving the audit table, a connecti
 | Identity | Keycloak, PKCE for the browser, bearer tokens for scripts | Entra ID: two app registrations (API with five app roles, browser app as a PKCE-only public client), `app_role_assignment_required`, roles from groups |
 | Event consumers | `notifier` and `agents` services (`ROLE=events`, own `REACTOR_CONSUMERS`) | one Container App per `consumer_sets` entry, one replica minimum, alerts on lag and dead deliveries |
 | Reader mail | Mailpit (SMTP sink, inbox on :8025) | Azure Communication Services Email with the managed identity, no SMTP password |
-| Public edge | nginx cache on `/api/public` | Front Door Standard: cache of public reads, WAF rate rule on the subscription form |
+| Public edge | nginx cache on `/api/public` | Front Door Premium: cache of public reads, managed WAF rule sets (Log first) and a rate rule on the subscription form, Private Link to a Container Apps environment that has no public address |
 | API, worker | containers, `--scale worker=2` | Container Apps in a zone-redundant environment, 2 to 4 API and 2 to 3 worker replicas, health probes, scale on concurrent requests |
 | Schema | `migrate` one-shot | a Container Apps job run by the pipeline before each rollout, under a *different* identity from the runtime (the runtime cannot alter tables; the audit table is append-only for it) |
 | Database | PostgreSQL 16 | Flexible Server, zone-redundant HA, delegated subnet, no public endpoint, Entra authentication only, 14-day PITR, geo-redundant backup, locked against deletion |
@@ -167,7 +167,7 @@ Next steps for real scale: partitioning or archiving the audit table, a connecti
 | Delivery | `docker compose up --build` | GitHub Actions with a federated credential, image promoted by digest, migrate, roll out, smoke test (written, not run) |
 | Operations | `/metrics`, logs | Log Analytics, 8 alerts (replicas below floor, restarts, 5xx, database CPU, storage, connections, a failed publication) plus a replica alert per consumer set, outbox lag and dead deliveries, budget |
 
-What is verified offline and what is not is in [infra/azure/README.md](../infra/azure/README.md): `validate` against the real provider schemas, 24 mocked-provider tests of the security and resilience properties, tflint, trivy and checkov all pass; **nothing was applied**, so Azure's acceptance of the configuration, the Entra token claims, the managed-identity database login and the alert metric names are unproven, each with a named check for the first deploy. Also unproven: mail through the managed identity, Front Door caching and the proxy hop count behind it, the consumer-set alerts. Not included on purpose: WAF managed rules (Premium), private endpoints for the registry and vault, an egress firewall, a second region, tracing, a message broker.
+What is verified offline and what is not is in [infra/azure/README.md](../infra/azure/README.md): `validate` against the real provider schemas, 41 mocked-provider tests of the security and resilience properties, tflint, trivy and checkov all pass; **nothing was applied**, so Azure's acceptance of the configuration, the Entra token claims, the managed-identity database login and the alert metric names are unproven, each with a named check for the first deploy. Also unproven: mail through the managed identity, Front Door caching and the proxy hop count behind it, the consumer-set alerts. Built but equally unproven: the private network (registry and vault private endpoints, NAT egress, Private Link from Front Door), the second region (`docs/DR.md`, never rehearsed), the landing zone (`infra/azure-landing-zone`). The database's limits and the triggers to add a message broker are in `docs/adr/0001-database-bottleneck-and-service-bus.md`. Not included on purpose: an egress firewall (the NAT gateway gives one address, no filtering), tracing, a message broker.
 
 ## 5. What was cut, and why
 
@@ -201,7 +201,7 @@ Verified by running it:
 
 Not verified, or only designed:
 
-- **Everything on Azure.** The Terraform passes validate, tflint, trivy, checkov and 24 mocked tests; it was never applied. Unproven until the first deploy: Entra app roles in the token, the managed-identity database login, `LISTEN/NOTIFY` through the managed server, the container subnet and NSG, the alert metric names, the deploy workflow, failover and restore times.
+- **Everything on Azure.** The Terraform passes validate, tflint, trivy, checkov and 41 mocked tests; it was never applied. Unproven until the first deploy: Entra app roles in the token, the managed-identity database login, `LISTEN/NOTIFY` through the managed server, the container subnet and NSG, the alert metric names, the deploy workflow, Private Link from Front Door, the build agent pool, the second region's replica, failover and restore times (`infra/azure/scripts/smoke.sh` checks what a running deployment can answer).
 - Performance on Azure (the measurements are a laptop under Azure-sized limits).
 
 - The Anthropic provider against the live API (the request/response shape is tested against a stubbed `fetch`).

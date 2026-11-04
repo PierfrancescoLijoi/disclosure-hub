@@ -100,6 +100,10 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
       if (path === '/healthz' || path === '/readyz') return; // the platform's own probes
       const given = req.headers['x-azure-fdid'];
       if (typeof given !== 'string' || given.toLowerCase() !== edgeId.toLowerCase()) {
+        if (rt.config.EDGE_ID_MODE === 'log') {
+          req.log.warn({ path, sentHeader: typeof given === 'string' }, 'request without the edge id (EDGE_ID_MODE=log: allowed)');
+          return;
+        }
         return reply.status(403).send({ error: { code: 'EDGE_ONLY', message: 'Not reachable directly' } });
       }
     });
@@ -168,6 +172,7 @@ export async function buildApp(rt: Runtime): Promise<FastifyInstance> {
   });
   app.get('/readyz', async () => {
     await rt.store.read.settings.get('ping');
+    await rt.publicRead?.read.settings.get('ping'); // a replica that is down must take the instance out of rotation, or every public read answers 500
     return { ok: true, role: rt.config.ROLE };
   });
 
