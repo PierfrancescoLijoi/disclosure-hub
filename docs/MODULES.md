@@ -97,9 +97,19 @@ Hard rules for any channel that calls out to an address a stranger typed:
 
 ## Add a jurisdiction
 
-Unchanged and independent of the above: a policy (declarative categories and rules) plus a gateway adapter,
-registered in `jurisdictions/index.ts`. See ARCHITECTURE.md §2.1. A new jurisdiction automatically appears in the
-public archive filters and the follow form (they read the policy's categories).
+Unchanged and independent of the above: a policy (declarative categories and rules) plus a gateway adapter. See
+ARCHITECTURE.md §2.1 and [BRIEF-RESPONSE.md](BRIEF-RESPONSE.md#3-without-duplicating-effort-extending-to-more-jurisdictions).
+
+1. Write the policy in `apps/server/src/jurisdictions/<code>.ts` with `definePolicy` (copy `uk.ts` or `us.ts`).
+2. Write a gateway implementing `PublishGateway` (`find`, `submit`; `GatewayError` `transient` or `permanent`).
+3. Register the policy in `jurisdictions/index.ts` and the gateway in `runtime.ts` (`GatewayRegistry`).
+4. Give each issuer the profile the policy asks for (`SEED_ISSUERS_JSON` or the seed).
+
+A new jurisdiction automatically appears in the composer menus, the detail form, the archive and activity filters, the
+publishing console and the follow form: they read the registered policies from the server. Optional, cosmetic:
+sample text for the "Fill with example content" button in `apps/web/src/examples.ts`, and the word "filing" for a new
+channel in `apps/web/src/labels.ts` (`SEND_NOUN`). Proof that no workflow file changes: `operations.test.ts`, "adding a
+jurisdiction".
 
 ## Where things live
 
