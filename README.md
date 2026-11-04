@@ -25,6 +25,14 @@ text (`/public/announcements`), an Atom feed per filter, and follow-by-email or 
 one-click unsubscribe. Everything that follows a workflow step (telling followers, running advisory agents) is a consumer of
 a domain event, so adding another agent or channel does not touch the workflow.
 
+## Diagrams
+
+Editable draw.io sources with PNG exports, in `docs/diagrams/`:
+
+- [`01-use-cases`](docs/diagrams/01-use-cases.drawio.png): the four roles and what each does.
+- [`02-azure-architecture`](docs/diagrams/02-azure-architecture.drawio.png): the Azure design with its resources (validated offline, not applied).
+- [`03-local-architecture`](docs/diagrams/03-local-architecture.drawio.png): the Compose twin and how one filing flows through it.
+
 ## One architecture, three ways to run it
 
 | | `npm start` | `docker compose up` (the Azure twin) | Azure (`infra/azure`) |

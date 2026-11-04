@@ -6,6 +6,8 @@ legal advice; both newswires are mocks.
 
 ## 1. Shape
 
+Pictures first: [roles and use cases](diagrams/01-use-cases.drawio.png), [Azure](diagrams/02-azure-architecture.drawio.png), [local](diagrams/03-local-architecture.drawio.png) (draw.io sources next to each PNG).
+
 A modular monolith with hexagonal boundaries, in TypeScript end to end. One codebase, one image;
 `ROLE=api | worker | events | all` decides what a process does.
 
