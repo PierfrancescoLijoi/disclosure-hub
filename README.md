@@ -24,6 +24,7 @@ key. You need the code folder and an internet connection.
 
 The repository is private, so sign in to GitHub with an account that has access, then on the repository page choose
 *Code, Download ZIP* and unzip it (or `git clone https://github.com/PierfrancescoLijoi/disclosure-hub.git`).
+No access? Ask the Author to invite your GitHub account, or use the ZIP you were sent.
 
 ### 2. Run the bootstrap
 
@@ -32,14 +33,17 @@ The repository is private, so sign in to GitHub with an account that has access,
 | **Windows** | Double-click **`bootstrap.cmd`** in the unzipped folder, or run `bootstrap.cmd` in a terminal |
 | **Linux, macOS** | In a terminal, in the folder: `sh bootstrap.sh` |
 
-It does four things and tells you each step:
+It runs three steps and prints each one (`1/3`, `2/3`, `3/3`):
 
-1. Looks for Node.js 22 or newer. If it is missing, it downloads the official portable Node.js from nodejs.org into
-   `.tools/node` **inside this folder** and checks its SHA-256 against nodejs.org's published list. Nothing is installed
-   system-wide, no administrator rights are used, and your PATH is not changed.
-2. Installs the dependencies (`npm install`). They are ready-made, so no compiler or Python is needed.
-3. Builds the web app, creates a local SQLite database in `apps/server/data/` and seeds demo companies and people.
-4. Starts the app. When it prints `Open http://localhost:3000`, open that address in a browser.
+1. **Node.js.** Looks for Node.js 22 or newer. If it is missing, it downloads the official portable Node.js from
+   nodejs.org into `.tools/node` **inside this folder** and checks its SHA-256 against nodejs.org's published list. Nothing
+   is installed system-wide, no administrator rights are used, and your PATH is not changed.
+2. **Dependencies.** Runs `npm install`. They are ready-made, so no compiler or Python is needed.
+3. **Start.** Builds the web app, creates a local SQLite database in `apps/server/data/`, seeds demo companies and people,
+   and starts the app. When it prints `Open http://localhost:3000`, open that address in a browser.
+
+On Windows, a ZIP downloaded from the internet may make a *Windows protected your PC* (SmartScreen) window appear when you
+double-click `bootstrap.cmd`: choose *More info*, then *Run anyway*. The script is plain text; read it first if you wish.
 
 Run the same command again later to start it; it will not download anything twice. To only prepare it without starting:
 `bootstrap.cmd -NoStart` (Windows) or `sh bootstrap.sh --no-start`. To remove everything, delete the folder.
@@ -48,7 +52,7 @@ Needs: **Windows** with PowerShell (built in); **Linux or macOS** with `sh`, `ta
 stops with a clear message if one is missing, if the download is blocked (a proxy or a firewall), or if a checksum does not
 match. In that case use the manual route below.
 
-### Manual route (if you prefer, or the bootstrap cannot download)
+#### Manual route for step 2 (if you prefer, or the bootstrap cannot download)
 
 Install **Node.js 22 or newer** (the current LTS from <https://nodejs.org>) and check it:
 
@@ -155,16 +159,11 @@ The same container image and the same business logic run in all three; environme
 
 ## Run it
 
-### Mode 1: local, nothing to install but Node
+### Mode 1: local (SQLite, one process)
 
-Needs Node 22 or newer.
-
-```bash
-npm install
-npm start
-```
-
-Open <http://localhost:3000>. SQLite file in `apps/server/data/`, in-process job queue, one process.
+This is what the [Quick start](#quick-start-from-a-clean-computer) runs. With Node 22 or newer already installed it is
+just `npm install` then `npm start`, and the app is on <http://localhost:3000>. SQLite file in `apps/server/data/`,
+in-process job queue, one process.
 For development, `npm run dev` runs the server with reload and `npm run dev -w apps/web` serves the UI on
 <http://localhost:5173> (proxies `/api` to :3000).
 
