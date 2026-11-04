@@ -17,14 +17,18 @@ jurisdictions, with one shared workflow and per-jurisdiction rules and delivery.
 
 ## Quick start from a clean computer
 
-You need a terminal, **Git** and **Node.js 20.19 or newer** (the LTS from <https://nodejs.org> is fine). Nothing else:
-no database, no Docker, no account, no API key. Check what you have:
+You need a terminal, **Git** and **Node.js 22 or newer** (the current LTS from <https://nodejs.org> is fine). Nothing else:
+no database, no Docker, no compiler, no Python, no account, no API key. Check what you have:
 
 ```bash
 node -v
 ```
 
-It must print `v20.19` or higher. If `git` is missing, install it from <https://git-scm.com>.
+It must print `v22` or higher. If `git` is missing, install it from <https://git-scm.com>.
+
+**Node 20 or older is refused** with an `EBADENGINE` message that names the required version. The reason: the SQLite driver
+(`better-sqlite3`) ships ready-made binaries for Node 22 and newer only, so older versions would have to compile it, which
+needs Python and a C++ toolchain (Visual Studio Build Tools on Windows).
 
 **1. Get the code.** The repository is private, so sign in to GitHub with an account that has access (or use the
 *Code, Download ZIP* button and unzip it):
@@ -134,7 +138,7 @@ The same container image and the same business logic run in all three; environme
 
 ### Mode 1: local, nothing to install but Node
 
-Needs Node 20.19 or newer.
+Needs Node 22 or newer.
 
 ```bash
 npm install
@@ -146,6 +150,10 @@ For development, `npm run dev` runs the server with reload and `npm run dev -w a
 <http://localhost:5173> (proxies `/api` to :3000).
 
 ### Mode 2: containers, PostgreSQL, real sign-in (the local twin of Azure)
+
+Needs **Docker Desktop** (or Docker Engine with the Compose plugin) running, and the ports 3000, 8080, 8081 and 8025 free.
+You do not need Node for this mode. The first build takes about two minutes (it pulls the base images and builds one image
+for every role).
 
 ```bash
 docker compose up --build
@@ -203,7 +211,7 @@ Without a browser, drive the whole thing through the REST API (one announcement 
 
 ```bash
 npm run demo                              # npm start on http://localhost:3000, persona header
-AUTH=oidc npm run demo                    # the Compose stack, with a real bearer token per person
+AUTH=oidc npm run demo                    # the Compose stack, with a real bearer token per person (run npm install once on the host first)
 ```
 
 ## Throughput check

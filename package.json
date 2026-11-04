@@ -9,7 +9,7 @@
     "apps/*"
   ],
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22"
   },
   "scripts": {
     "start": "npm run build -w apps/web && npm run start -w apps/server",
