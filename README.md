@@ -15,6 +15,55 @@ jurisdictions, with one shared workflow and per-jurisdiction rules and delivery.
 > counsel and the real channel integrations. Both newswires are mocks. Sign-in is real OIDC in the container and Azure
 > setups (Keycloak locally, Microsoft Entra ID on Azure); `npm start` uses seeded personas for a zero-install demo.
 
+## Quick start from a clean computer
+
+You need a terminal, **Git** and **Node.js 20.19 or newer** (the LTS from <https://nodejs.org> is fine). Nothing else:
+no database, no Docker, no account, no API key. Check what you have:
+
+```bash
+node -v
+```
+
+It must print `v20.19` or higher. If `git` is missing, install it from <https://git-scm.com>.
+
+**1. Get the code.** The repository is private, so sign in to GitHub with an account that has access (or use the
+*Code, Download ZIP* button and unzip it):
+
+```bash
+git clone https://github.com/PierfrancescoLijoi/disclosure-hub.git
+```
+
+**2. Install and start** (the same commands on Windows PowerShell, macOS and Linux):
+
+```bash
+cd disclosure-hub
+npm install
+npm start
+```
+
+`npm install` downloads the dependencies once. `npm start` builds the web app, creates a local SQLite database in
+`apps/server/data/`, seeds demo companies and people, and starts everything in one process. When the log says
+`open http://localhost:3000`, open that address.
+
+**3. Use it.** On the sign-in page pick **alice** (author), write and submit an announcement for the UK or the US, then
+sign in as the approvers (**bob**, **carol**, **dan**) and approve, then as **erin** to publish. The step-by-step walk-through
+is under [Try it](#try-it). To watch the whole flow without a browser, open a second terminal in the same folder and run:
+
+```bash
+npm run demo
+```
+
+It publishes one UK and one US announcement through the REST API and prints the acknowledgements and the audit-chain check.
+
+**Stop** with `Ctrl+C`. **Start from scratch** by deleting the `apps/server/data/` folder. **Run the tests** with `npm test`.
+
+**Port 3000 is taken?** Choose another one: `PORT=3001 npm start` (macOS, Linux, Git Bash) or
+`$env:PORT=3001; npm start` (PowerShell), and open that port.
+
+Want the production-shaped setup (PostgreSQL, real sign-in with Keycloak, separate worker, notifier and agent processes)?
+That needs **Docker Desktop**: see [Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure). Azure is
+design and Terraform only and is not needed to run anything.
+
 ## The brief, answered
 
 | The brief asked for | Answer in one line | Detail |
