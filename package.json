@@ -1,6 +1,8 @@
 {
   "name": "disclosure-hub",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Pierfrancesco Lijoi",
   "version": "0.1.0",
   "description": "Regulatory announcement platform: draft to published in multiple jurisdictions (UK RNS, US EDGAR)",
   "workspaces": [

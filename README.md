@@ -15,10 +15,43 @@ jurisdictions, with one shared workflow and per-jurisdiction rules and delivery.
 > counsel and the real channel integrations. Both newswires are mocks. Sign-in is real OIDC in the container and Azure
 > setups (Keycloak locally, Microsoft Entra ID on Azure); `npm start` uses seeded personas for a zero-install demo.
 
-The write-up of design, trade-offs, what was cut and what comes next is in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Sizing for a small or medium company, with measurements:
-[docs/SIZING.md](docs/SIZING.md). The Azure deployment: [infra/azure/README.md](infra/azure/README.md).
-How to extend it (consumers, agents, channels, jurisdictions): [docs/MODULES.md](docs/MODULES.md).
+## The brief, answered
+
+| The brief asked for | Answer in one line | Detail |
+|---|---|---|
+| A working system: draft to published in each of two jurisdictions | UK (RNS) and US (EDGAR, 8-K) through one workflow; mock newswires; `npm start` | [Run it](#run-it), [Try it](#try-it) |
+| A system built for scale, in the code and the architecture | Enforced module boundaries; the database row is the truth and the queue a hint; an event outbox; processes split by role; measured and sized | [BRIEF-RESPONSE §1](docs/BRIEF-RESPONSE.md#1-built-for-scale-in-the-code-and-in-the-architecture), [SIZING](docs/SIZING.md) |
+| A clear way of handling regulatory and operational differences | Regulatory rules live in a **policy**, delivery in a **gateway adapter** | [BRIEF-RESPONSE §2](docs/BRIEF-RESPONSE.md#2-regulatory-and-operational-differences-two-kinds-two-homes) |
+| No duplicated effort, extensible to more jurisdictions | The workflow exists once; a jurisdiction is one policy file, one gateway and two registrations; the UI reads it from the server; a test adds a made-up country | [BRIEF-RESPONSE §3](docs/BRIEF-RESPONSE.md#3-without-duplicating-effort-extending-to-more-jurisdictions), [MODULES](docs/MODULES.md#add-a-jurisdiction) |
+
+What is **verified by running it**, what is **measured** on a laptop and what is only **designed** (the whole Azure
+deployment) is stated in [BRIEF-RESPONSE §4](docs/BRIEF-RESPONSE.md#4-verified-measured-designed).
+
+## Documentation map
+
+Start with the first two; the rest is reference.
+
+| Document | What it answers |
+|---|---|
+| [docs/BRIEF-RESPONSE.md](docs/BRIEF-RESPONSE.md) | The three points of the brief, each with its claim, proof and limit; likely questions |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | Functional and non-functional requirements with status, assumptions, decisions, open points |
+| [docs/GLOSSARY.md](docs/GLOSSARY.md) | Every term (system, regulatory, cloud) with the file that defines it |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design, key decisions, trade-offs, scaling, what was cut, verified versus designed, next steps |
+| [docs/MODULES.md](docs/MODULES.md) | Extension guide: events, consumers, agents, channels, jurisdictions |
+| [docs/SIZING.md](docs/SIZING.md) | Capacity model, measurements, cost drivers |
+| [docs/adr/0001-database-bottleneck-and-service-bus.md](docs/adr/0001-database-bottleneck-and-service-bus.md) | When the single database stops being enough, and the triggers |
+| [docs/DR.md](docs/DR.md) | Losing a region: what exists, numbers, how to fail over |
+| [docs/UI.md](docs/UI.md) | Screens, routes, deviations from the product spec |
+| [infra/azure/README.md](infra/azure/README.md) | The Azure design, what is verified offline, what the first deploy must prove, cost |
+| [infra/azure-landing-zone](infra/azure-landing-zone/README.md) | Governance base: management groups, policy, RBAC |
+| [discovery/spec.md](discovery/spec.md) | Problem, goals, stories, requirements (EARS), business rules, known limits of the regulatory model |
+| [discovery/ledger.md](discovery/ledger.md) | Assumptions and open points (L-1 to L-28) |
+| [discovery/handoff.md](discovery/handoff.md) | The architecture-driving decisions (ASR-1 to ASR-20) and risks |
+| [discovery/questions.md](discovery/questions.md) | Questions for the panel, with the default assumed |
+
+Diagrams (draw.io sources next to each PNG) are under [Diagrams](#diagrams).
+
+Short on time: README (this page), then BRIEF-RESPONSE, then the [Azure diagram](docs/diagrams/02-azure-architecture.drawio.png).
 
 **For readers, not only staff.** Published announcements are public: an archive filterable by company, category, date and
 text (`/public/announcements`), an Atom feed per filter, and follow-by-email or signed webhook with double opt-in and
@@ -243,7 +276,7 @@ apps/web          React + Vite single-page app (UI built from the SignalFlow IR 
 deploy/keycloak   the local identity provider's realm
 infra/azure       Terraform for the Azure deployment, mocked tests, verify script
 discovery/        requirements work: assumptions, EARS requirements, open questions
-docs/             architecture write-up, extension guide (MODULES.md), sizing, UI
+docs/             brief response, requirements, glossary, architecture write-up, extension guide (MODULES.md), sizing, DR, UI, ADRs, diagrams
 ```
 
 ## Assumptions and deviations
@@ -254,3 +287,10 @@ docs/             architecture write-up, extension guide (MODULES.md), sizing, U
 - Regulatory model, in short: the UK PDMR deadline runs from the transaction (MAR Art. 19(3)); inside information is released even when the RNS window is closed; the US issuer profile has a filer status (domestic filers file Form 8-K, foreign private issuers Form 6-K); an 8-K with only Items 7.01 or 8.01 has no deadline; Item 1.05 counts from the materiality determination. What is not modelled (corrections, dual listing, insider lists, closed periods, TR-1, 10-Q/10-K, scheduled release) and what must be verified against a real provider (no idempotency lookup at real RIS or EDGAR, EDGAR Next credentials) is at the end of `discovery/spec.md`.
 - Rule sources are named in code comments next to each rule. Scheduling and embargo, attachments, iXBRL, translations and real newswire connections are out of scope (see the write-up).
 - Full list of assumptions and the questions I would put to the panel: `discovery/ledger.md` and `discovery/questions.md`.
+
+## Licence and authorship
+
+Copyright (c) 2026 Pierfrancesco Lijoi. All rights reserved. This is the Author's own work. Anyone given access to this
+repository to assess it (for example the reviewers of a take-home exercise) may read it and run it for that purpose;
+every other use needs the Author's written permission. Full terms in [LICENSE](LICENSE). Third-party packages keep their
+own licences. The regulatory rules are simplified models, not legal advice.

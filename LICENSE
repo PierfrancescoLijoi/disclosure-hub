@@ -1,0 +1,25 @@
+Disclosure Hub
+Copyright (c) 2026 Pierfrancesco Lijoi. All rights reserved.
+
+This software, its documentation, diagrams and infrastructure code (together, the "Work") are the original work of
+Pierfrancesco Lijoi (the "Author"), who owns all rights in it. No licence is granted except as stated below.
+
+1. Evaluation permission. Anyone the Author has given access to this repository for the purpose of assessing the
+   Author's work, for example a prospective employer reviewing a take-home exercise, may read the Work, run it on their
+   own machines and share it internally with the people carrying out that assessment, for that purpose only and for as
+   long as the assessment lasts.
+
+2. Everything else is reserved. Without the Author's prior written permission, you may not copy, publish, distribute,
+   sublicense, sell, host as a service, modify for other purposes, or use the Work, or any substantial part of it, in
+   any product, project or service, commercial or not. Keeping a copy after the assessment ends, or using the
+   approach, structure or text of the Work to build something else, is not covered by this permission.
+
+3. Third-party components. The Work depends on open source packages and container images (for example Fastify, Kysely,
+   React, Zod, PostgreSQL, Keycloak). They are not part of the Work and stay under their own licences, which are listed
+   in their packages and in package-lock.json.
+
+4. No warranty. The Work is provided "as is", without warranty of any kind. The regulatory rules it models are
+   simplified, are not legal advice, and must not be relied on for a real filing. To the extent permitted by law, the
+   Author is not liable for any claim or damage arising from the Work or its use.
+
+To ask for a wider licence, contact the Author through the GitHub account that publishes this repository.
