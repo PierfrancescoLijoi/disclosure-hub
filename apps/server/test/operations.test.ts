@@ -249,4 +249,24 @@ describe('module boundaries', () => {
       expect(violations).toEqual([]);
     });
   }
+
+  // The claim "the workflow never asks which country this is", enforced: only the policies, the gateways, the demo
+  // data and the advisory mock name a jurisdiction or a channel. Everything else, UI included, reads them from the policies.
+  it('names no jurisdiction or channel outside the policies, gateways and demo data', () => {
+    const named = /['"`](UK|US|DK|rns|edgar|cph)['"`]/;
+    const webSrc = join(src, '..', '..', 'web', 'src');
+    const scan = (dir: string, ext: RegExp): string[] =>
+      readdirSync(dir).flatMap((f) =>
+        statSync(join(dir, f)).isDirectory()
+          ? scan(join(dir, f), ext)
+          : ext.test(f) && named.test(readFileSync(join(dir, f), 'utf8'))
+            ? [relative(join(src, '..', '..'), join(dir, f))]
+            : [],
+      );
+    const violations = [
+      ...['domain', 'application', 'http', 'ports', 'auth'].flatMap((d) => scan(join(src, d), /\.ts$/)),
+      ...scan(webSrc, /\.tsx?$/),
+    ];
+    expect(violations).toEqual([]);
+  });
 });

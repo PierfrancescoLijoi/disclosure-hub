@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dkExamples } from './dk.examples.js';
 import { addBusinessDays, addDays, civilOf, daysBetween, zonedToUtc } from '../domain/calendar.js';
 import { definePolicy, type Deadline, type Rule, type RuleContext } from '../domain/policy.js';
 import { DK_HOLIDAYS } from './calendars.js';
@@ -279,6 +280,7 @@ export const dkPolicy = definePolicy({
   categories: {
     inside_information: {
       label: 'Inside information (EU MAR Art. 17)',
+      example: dkExamples.inside_information,
       schema: insideInfo,
       rules: insideInfoRules(PREFIX),
       approval: { min: 2, mustInclude: ['company_secretary'] },
@@ -287,6 +289,7 @@ export const dkPolicy = definePolicy({
     },
     pdmr_dealing: {
       label: "Managers' transaction (EU MAR Art. 19)",
+      example: dkExamples.pdmr_dealing,
       schema: pdmr,
       rules: [...pdmrRules(PREFIX, DK_HOLIDAYS), thresholdRule],
       approval: { min: 1, mustInclude: ['company_secretary'] },
@@ -304,6 +307,7 @@ export const dkPolicy = definePolicy({
     },
     major_shareholding: {
       label: 'Major shareholder announcement (Transparency Directive Art. 9)',
+      example: dkExamples.major_shareholding,
       schema: majorShareholding,
       rules: holdingRules,
       approval: { min: 1, mustInclude: ['company_secretary'] },
@@ -311,6 +315,7 @@ export const dkPolicy = definePolicy({
     },
     share_buyback: {
       label: 'Share buyback report (EU MAR Art. 5)',
+      example: dkExamples.share_buyback,
       schema: shareBuyback,
       rules: buybackRules,
       approval: { min: 1, mustInclude: ['cfo'] },
@@ -318,6 +323,7 @@ export const dkPolicy = definePolicy({
     },
     general_meeting: {
       label: 'Notice of general meeting (Companies Act)',
+      example: dkExamples.general_meeting,
       schema: generalMeeting,
       rules: meetingRules,
       approval: { min: 2, mustInclude: ['company_secretary'] },
@@ -325,6 +331,7 @@ export const dkPolicy = definePolicy({
     },
     general: {
       label: 'Other company announcement',
+      example: dkExamples.general,
       schema: z.object({ language }),
       approval: { min: 1, mustInclude: [] },
     },

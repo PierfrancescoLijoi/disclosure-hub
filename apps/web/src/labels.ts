@@ -65,9 +65,8 @@ export const isApprover = (roles: string[]) => roles.some((r) => APPROVER_ROLES.
 export const isAuthor = (roles: string[]) => roles.includes('author');
 export const isPublisher = (roles: string[]) => roles.includes('publisher');
 
-/** What each channel calls the act of sending; the rest of the UI is the same for every jurisdiction. */
-const SEND_NOUN: Record<string, string> = { edgar: 'filing' };
-export const channelLabel = (j: Pick<Jurisdiction, 'channel'>) => `${j.channel.name} · mock ${SEND_NOUN[j.channel.id] ?? 'distribution'}`;
+/** What a channel calls the act of sending comes from its policy; the rest of the UI is the same for every jurisdiction. */
+export const channelLabel = (j: Pick<Jurisdiction, 'channel'>) => `${j.channel.name} · mock ${j.channel.sendNoun ?? 'distribution'}`;
 export const platformBadge = (j: Pick<Jurisdiction, 'code' | 'channel'>) => `${j.code} · ${j.channel.id.toUpperCase()} mock`;
 
 /** The next step for an announcement, in the words of the person who has to take it. */

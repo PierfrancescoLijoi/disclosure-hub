@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, errorText, type Issue, type Preview, type View } from '../api';
-import { EXAMPLES } from '../examples';
 import { channelLabel } from '../labels';
 import { SchemaForm } from '../SchemaForm';
 import { useSession } from '../session';
@@ -81,7 +80,7 @@ export function Composer() {
 
   const jurisdiction = jurisdictions.find((j) => j.code === draft.jurisdiction) ?? jurisdictions[0]!;
   const category = jurisdiction.categories.find((c) => c.key === draft.category) ?? jurisdiction.categories[0]!;
-  const example = EXAMPLES[`${draft.jurisdiction}.${draft.category}`];
+  const example = category.example;
   const missing = useMemo(() => missingRequired(category.jsonSchema, draft.metadata), [category, draft.metadata]);
   const hasContent = !!draft.headline || !!draft.body || Object.keys(draft.metadata).length > 0;
 
@@ -285,7 +284,7 @@ export function Composer() {
               <div className="row between wrap">
                 <h2>Write the announcement</h2>
                 {example && !id && (
-                  <button type="button" className="btn secondary small" onClick={() => edit(example())}>
+                  <button type="button" className="btn secondary small" onClick={() => edit(example)}>
                     Fill with example content
                   </button>
                 )}

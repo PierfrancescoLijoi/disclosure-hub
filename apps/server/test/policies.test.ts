@@ -18,6 +18,33 @@ const issuer: Issuer = {
   },
 };
 
+describe('sample content', () => {
+  const policies = [ukPolicy, usPolicy, dkPolicy];
+
+  it('is offered by the policy, and every sample parses against its own category schema', () => {
+    for (const policy of policies) {
+      for (const category of policy.describe(NOW).categories) {
+        if (!category.example) continue;
+        const parsed = policy.parseMetadata(category.key, category.example.metadata);
+        expect(parsed.success, `${policy.code}.${category.key}`).toBe(true);
+      }
+    }
+  });
+
+  it('gives every jurisdiction at least one sample, with dates relative to the clock it was asked at', () => {
+    for (const policy of policies) {
+      expect(policy.describe(NOW).categories.some((c) => c.example)).toBe(true);
+    }
+    const holding = (now: Date) => dkPolicy.describe(now).categories.find((c) => c.key === 'major_shareholding')!.example!.metadata;
+    expect(holding(NOW)).not.toEqual(holding(new Date(NOW.getTime() + 86_400_000)));
+  });
+
+  it('lets a channel name what it calls sending, so the UI keeps no per-channel table', () => {
+    expect(usPolicy.describe().channel.sendNoun).toBe('filing');
+    expect(ukPolicy.describe().channel.sendNoun).toBeUndefined();
+  });
+});
+
 const BODY = 'A sufficiently detailed announcement for shareholders. Enquiries: ir@northwind.example';
 
 const input = (category: string, metadata: unknown, over: { headline?: string; body?: string; issuer?: Issuer; now?: Date } = {}) => ({

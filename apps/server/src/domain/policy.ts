@@ -29,8 +29,17 @@ export interface Deadline {
   basis: string;
 }
 
+/** Sample content for the "Fill with example content" button; dates are relative to `now`. */
+export interface CategoryExample {
+  headline: string;
+  body: string;
+  metadata: Record<string, unknown>;
+}
+
 export interface CategoryDefinition<M = any> {
   label: string;
+  /** Optional sample content; the UI shows the button only when a category has one. */
+  example?: (now: Date) => CategoryExample;
   schema: z.ZodType<M>;
   rules?: Rule<M>[];
   approval: ApprovalRequirement | ((ctx: RuleContext<M>) => ApprovalRequirement);
@@ -47,13 +56,20 @@ export interface Timing {
   holdWhenClosed: boolean;
 }
 
+/** `sendNoun` is what the channel calls the act of sending ("filing" for EDGAR); the UI defaults to "distribution". */
+export interface ChannelInfo {
+  id: string;
+  name: string;
+  sendNoun?: string;
+}
+
 export interface JurisdictionInfo {
   code: JurisdictionCode;
   name: string;
-  channel: { id: string; name: string };
+  channel: ChannelInfo;
   timezone: string;
   window: OpeningWindow;
-  categories: { key: string; label: string; jsonSchema: unknown }[];
+  categories: { key: string; label: string; jsonSchema: unknown; example?: CategoryExample }[];
 }
 
 /** The contract a jurisdiction fulfils. The workflow only ever talks to this. */
@@ -68,7 +84,7 @@ export interface JurisdictionPolicy {
   timing(ctx: RuleContext): Timing;
   render(ctx: RuleContext): DistributionPayload;
   postPublication(ctx: RuleContext): string[];
-  describe(): JurisdictionInfo;
+  describe(now?: Date): JurisdictionInfo;
   hasCategory(key: string): boolean;
   /** Parses category metadata; the rule context needs the parsed form. */
   parseMetadata(category: string, metadata: unknown): { success: true; data: unknown } | { success: false };
@@ -88,7 +104,7 @@ export interface PolicyConfig {
   code: JurisdictionCode;
   name: string;
   timezone: string;
-  channel: { id: string; name: string };
+  channel: ChannelInfo;
   /** Shape of issuer.profiles[code]: the identifiers the channel needs. */
   issuerProfile: z.ZodType<Record<string, string>>;
   headlineMax: number;
@@ -198,7 +214,7 @@ export function definePolicy(cfg: PolicyConfig): JurisdictionPolicy {
     render: (ctx) => cfg.render(ctx),
     postPublication: (ctx) => cfg.postPublication(ctx),
 
-    describe() {
+    describe(now = new Date()) {
       return {
         code: cfg.code,
         name: cfg.name,
@@ -209,6 +225,7 @@ export function definePolicy(cfg: PolicyConfig): JurisdictionPolicy {
           key,
           label: def.label,
           jsonSchema: z.toJSONSchema(def.schema, { unrepresentable: 'any' }),
+          ...(def.example && { example: def.example(now) }),
         })),
       };
     },

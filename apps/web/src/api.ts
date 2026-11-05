@@ -9,11 +9,13 @@ export interface Category {
   key: string;
   label: string;
   jsonSchema: Schema;
+  /** Sample content from the policy; the button appears only when present. */
+  example?: { headline: string; body: string; metadata: Record<string, unknown> };
 }
 export interface Jurisdiction {
   code: string;
   name: string;
-  channel: { id: string; name: string };
+  channel: { id: string; name: string; sendNoun?: string };
   timezone: string;
   window: { open: string; close: string };
   categories: Category[];

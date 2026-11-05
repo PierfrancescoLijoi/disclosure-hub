@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ukExamples } from './uk.examples.js';
 import { definePolicy } from '../domain/policy.js';
 import { UK_BANK_HOLIDAYS } from './calendars.js';
 import { isValidLei, isValidTidm } from './identifiers.js';
@@ -30,6 +31,7 @@ export const ukPolicy = definePolicy({
   categories: {
     inside_information: {
       label: 'Inside information (UK MAR Art. 17)',
+      example: ukExamples.inside_information,
       schema: insideInfoSchema,
       rules: insideInfoRules('UK_MAR'),
       approval: { min: 2, mustInclude: ['company_secretary'] },
@@ -38,6 +40,7 @@ export const ukPolicy = definePolicy({
     },
     pdmr_dealing: {
       label: 'PDMR dealing notification (UK MAR Art. 19)',
+      example: ukExamples.pdmr_dealing,
       schema: pdmrSchema,
       rules: pdmrRules('UK_MAR', UK_BANK_HOLIDAYS),
       approval: { min: 1, mustInclude: ['company_secretary'] },
@@ -45,6 +48,7 @@ export const ukPolicy = definePolicy({
     },
     results: {
       label: 'Annual or interim results (DTR 4)',
+      example: ukExamples.results,
       schema: resultsSchema,
       rules: resultsRules(TZ),
       approval: { min: 2, mustInclude: ['cfo'] },
@@ -52,6 +56,7 @@ export const ukPolicy = definePolicy({
     },
     general: {
       label: 'Other regulatory announcement',
+      example: ukExamples.general,
       schema: z.object({}),
       approval: { min: 1, mustInclude: [] },
     },

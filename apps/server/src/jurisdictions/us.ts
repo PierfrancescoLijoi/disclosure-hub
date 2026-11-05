@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { usExamples } from './us.examples.js';
 import { addBusinessDays, civilOf, nextBusinessDay, zonedToUtc, type CivilDate } from '../domain/calendar.js';
 import { definePolicy, type Deadline, type Rule, type RuleContext } from '../domain/policy.js';
 import type { Issue } from '../domain/types.js';
@@ -173,7 +174,7 @@ export const usPolicy = definePolicy({
   code: 'US',
   name: 'United States',
   timezone: TZ,
-  channel: { id: 'edgar', name: 'SEC EDGAR' },
+  channel: { id: 'edgar', name: 'SEC EDGAR', sendNoun: 'filing' },
   issuerProfile: z
     .object({
       cik: z.string().refine(isValidCik, 'CIK must be 10 digits'),
@@ -188,6 +189,7 @@ export const usPolicy = definePolicy({
   categories: {
     form_8k: {
       label: 'Form 8-K current report',
+      example: usExamples.form_8k,
       schema: form8k,
       rules: rules8k,
       approval: ({ meta }) => ({ min: 2, mustInclude: meta.items.includes('2.02') ? ['legal', 'cfo'] : ['legal'] }),
