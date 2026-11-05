@@ -13,3 +13,4 @@ infra/**/.terraform/
 *.tfvars
 !*.tfvars.example
 .tools
+graphify-out/

@@ -172,7 +172,7 @@ from First North, and an inside-information flag that matches the type. It numbe
 |---|---|---|---|
 | Framework and channel | UK MAR, Listing Rules, DTR; RNS | Exchange Act, Form 8-K, Reg FD; EDGAR | EU MAR, Transparency Directive, Companies Act; Nasdaq Copenhagen, stored in the Danish OAM (Finanstilsynet) |
 | Categories | inside information, PDMR dealings, results, general | 8-K items 1.01, 1.05, 2.02, 5.02, 5.07, 7.01, 8.01; 6-K for foreign issuers | the UK's four plus major shareholder announcements, share buyback reports and notices of general meetings; each in Danish or English |
-| Deadline | inside information: "as soon as possible" (a delay needs a recorded justification); PDMR: 3 business days **from the transaction**; DTR: results deadlines | 8-K: 4 business days from the event; item 1.05: from the materiality determination; items 7.01 and 8.01: voluntary, no deadline; Reg FD: the later of 24 hours and the next NYSE open | the same MAR and reporting rules counted on the Danish calendar; shareholder notice 3 trading days from the notification; buyback report 7 market sessions from the first trade in the report; meeting notice at least 21 days (annual) or 14 days (extraordinary) before the meeting |
+| Deadline | inside information: "as soon as possible" (a delay needs a recorded justification); PDMR: 3 business days **from the transaction**; DTR: results deadlines | 8-K: 4 business days from the event; item 1.05: from the materiality determination; items 7.01 and 8.01: voluntary, no deadline; Reg FD: simultaneous when intentional, otherwise the later of 24 hours and the next day's NYSE open | the same MAR and reporting rules counted on the Danish calendar; shareholder notice 3 trading days from the notification; buyback report 7 market sessions from the first trade in the report; meeting notice at least 21 days (annual) or 14 days (extraordinary) before the meeting |
 | Approvals | inside information: two approvals including the company secretary; the others one | 8-K: legal plus one; item 2.02 requires legal **and** the CFO | as the UK; buyback reports need the CFO; meeting notices two approvers including the company secretary |
 | Window | RNS hours, but inside information is never held for the window | EDGAR 06:00 to 22:00 ET; after 17:30 ET the filing date is the next business day | 07:00 to 22:00 Copenhagen; inside information is never held |
 | Identifiers and issuer status | LEI, ISIN | CIK, CCC, filer status (domestic or foreign) | CVR, LEI, ISIN, ticker, market segment (main market, or First North with a Certified Adviser) |
@@ -366,7 +366,7 @@ for each person (run `npm install` once on the host first).
 | Full start | `bootstrap.cmd` or `sh bootstrap.sh` |
 | Prepare only | `bootstrap.cmd -NoStart` / `sh bootstrap.sh --no-start` |
 | Demo through the API | `npm run demo` (or `bootstrap.cmd -Demo`) |
-| Tests | `npm test` (217 server), `npm test -w apps/web` (12 UI), `npm run typecheck` |
+| Tests | `npm test` (219 server plus 12 web), `npm run typecheck` |
 | Benchmark | `npm run bench`, `npm run bench:readers -w apps/server` |
 | Start from scratch | delete `apps/server/data/` |
 | Another port | `PORT=3001 npm start` (PowerShell: `$env:PORT=3001; npm start`) |
@@ -572,7 +572,7 @@ Cut in this order to protect the complete flow, the quality of the tests and the
 |---|---|
 | Draft→published in the UK, US and Denmark, from the UI, the REST demo and the tests | **Verified by running it** |
 | Retries, exhaustion, permanent rejection, lost acknowledgement, lease takeover after a crash, recovery of a lost wake-up | **Verified** (tests) |
-| Same suite on SQLite (217 tests, 7 skipped) and on PostgreSQL 16 + Redis 7 (all 224 tests, Denmark included, on 5 Nov), two worker processes with no double release | **Verified** |
+| 219 tests on SQLite; 7 gated integration tests run in CI with PostgreSQL 16 + Redis 7, including two worker processes with no double release | **Verified locally except the gated adapter tests; CI verifies the full 226** |
 | OIDC with Keycloak, Authorization Code + PKCE from a real browser | **Verified** |
 | Compose twin: separate api, worker, notifier, agents; mail delivered to Mailpit; nginx cache | **Verified** |
 | Bootstrap from scratch on Windows and Linux (Node 22.12/22.23.4/24, refusal of Node 18/20, Docker from a fresh clone) | **Verified**; macOS, Docker on a Linux host and a truly clean Windows **not** tried |

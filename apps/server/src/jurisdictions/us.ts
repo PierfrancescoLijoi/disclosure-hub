@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addBusinessDays, civilOf, nextOpenAfter, zonedToUtc, type CivilDate } from '../domain/calendar.js';
+import { addBusinessDays, civilOf, nextBusinessDay, zonedToUtc, type CivilDate } from '../domain/calendar.js';
 import { definePolicy, type Deadline, type Rule, type RuleContext } from '../domain/policy.js';
 import type { Issue } from '../domain/types.js';
 import { NYSE_HOLIDAYS, US_FEDERAL_HOLIDAYS } from './calendars.js';
@@ -8,8 +8,8 @@ import { isValidCcc, isValidCik } from './identifiers.js';
 /**
  * US model: Form 8-K for domestic filers (4 business days; Item 1.05 counts from the
  * materiality determination; Items 7.01 and 8.01 are voluntary and carry no deadline), Form 6-K
- * for foreign private issuers, and Regulation FD (prompt public disclosure after an unintentional
- * selective disclosure), all filed through EDGAR. Simplified for the exercise; hours and cut-offs
+ * for foreign private issuers, and Regulation FD (simultaneous public disclosure when intentional,
+ * prompt public disclosure when unintentional), all filed through EDGAR. Simplified for the exercise; hours and cut-offs
  * are assumptions, not legal advice.
  */
 
@@ -42,6 +42,7 @@ const form8k = z.object({
     .object({
       selectiveDisclosure: z.enum(['none', 'intentional', 'unintentional']).meta({ title: 'Selective disclosure' }),
       learnedAt: z.iso.datetime({ offset: true }).optional().meta({ title: 'Senior official learned of it at' }),
+      publicDisclosureSimultaneous: z.boolean().optional().meta({ title: 'Public disclosure is simultaneous' }),
     })
     .optional()
     .meta({ title: 'Regulation FD (Item 7.01)' }),
@@ -96,6 +97,10 @@ const rules8k: Rule<Meta8k>[] = [
       ? [error('US_REG_FD_LEARNED_AT', 'Unintentional selective disclosure needs the time a senior official learned of it', 'metadata.regFd.learnedAt')]
       : [],
   ({ meta }) =>
+    meta.regFd?.selectiveDisclosure === 'intentional' && meta.regFd.publicDisclosureSimultaneous !== true
+      ? [error('US_REG_FD_SIMULTANEOUS', 'An intentional selective disclosure requires simultaneous public disclosure', 'metadata.regFd.publicDisclosureSimultaneous')]
+      : [],
+  ({ meta }) =>
     meta.items.includes('1.05') && !meta.cyber
       ? [error('US_8K_1_05_DETAILS', 'Item 1.05 requires the time the incident was determined to be material', 'metadata.cyber')]
       : [],
@@ -130,10 +135,10 @@ function deadline8k({ meta }: { meta: Meta8k }): Deadline {
   const learnedAt = meta.regFd?.selectiveDisclosure === 'unintentional' ? meta.regFd.learnedAt : undefined;
   if (learnedAt) {
     const learned = new Date(learnedAt);
-    const nextOpen = nextOpenAfter(learned, TZ, '09:30', NYSE_HOLIDAYS);
+    const nextOpen = zonedToUtc(nextBusinessDay(civilOf(learned, TZ), NYSE_HOLIDAYS), '09:30', TZ);
     limits.push({
       at: new Date(Math.max(learned.getTime() + REG_FD_PROMPT_HOURS * 3_600_000, nextOpen.getTime())),
-      basis: 'Regulation FD prompt disclosure: later of 24 hours or next NYSE open (Rule 101(d))',
+      basis: "Regulation FD prompt disclosure: later of 24 hours or the next day's NYSE open (Rule 101(d))",
     });
   }
   if (limits.length === 0) {

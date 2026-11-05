@@ -135,6 +135,17 @@ describe('UK policy', () => {
     expect(interim.deadline?.at?.toISOString()).toBe('2026-09-30T22:59:00.000Z'); // BST: 23:59 London is 22:59Z
   });
 
+  it('clamps results deadlines to the last day of a shorter target month', () => {
+    const final = ukPolicy.timing(context(ukPolicy, 'results', { periodType: 'final', periodEnd: '2026-10-31' }));
+    expect(final.deadline?.at?.toISOString()).toBe('2027-02-28T23:59:00.000Z');
+
+    const interim = ukPolicy.timing(context(ukPolicy, 'results', { periodType: 'interim', periodEnd: '2026-01-31' }));
+    expect(interim.deadline?.at?.toISOString()).toBe('2026-04-30T22:59:00.000Z'); // BST: 23:59 London is 22:59Z
+
+    const leapYear = ukPolicy.timing(context(ukPolicy, 'results', { periodType: 'final', periodEnd: '2023-10-31' }));
+    expect(leapYear.deadline?.at?.toISOString()).toBe('2024-02-29T23:59:00.000Z');
+  });
+
   it('sets approval requirements per category', () => {
     const req = (c: string, m: Record<string, unknown> = {}) => ukPolicy.approvalRequirement(context(ukPolicy, c, m));
     expect(req('inside_information', { informationBecameKnownAt: '2026-11-03T11:30:00Z', personResponsible: person })).toEqual({ min: 2, mustInclude: ['company_secretary'] });
@@ -185,10 +196,18 @@ describe('US policy', () => {
     expect(usPolicy.timing(context(usPolicy, 'form_8k', friday)).deadline?.at?.toISOString()).toBe('2026-11-09T14:30:00.000Z');
   });
 
-  it('treats a Reg FD disclosure learned before the open as due 24 hours later, not at the next day open', () => {
-    // Monday 08:00 ET: today's 09:30 open is the next commencement of trading, so the 24 hours (Tuesday 08:00 ET) are the later limit.
+  it("uses the next trading day's open for a Reg FD disclosure learned before today's open", () => {
+    // Monday 08:00 ET: later of 24 hours (Tuesday 08:00) or the next day's NYSE open (Tuesday 09:30).
     const early = k8({ eventDate: '2026-11-02', items: ['7.01'], regFd: { selectiveDisclosure: 'unintentional', learnedAt: '2026-11-02T13:00:00Z' } });
-    expect(usPolicy.timing(context(usPolicy, 'form_8k', early)).deadline?.at?.toISOString()).toBe('2026-11-03T13:00:00.000Z');
+    expect(usPolicy.timing(context(usPolicy, 'form_8k', early)).deadline?.at?.toISOString()).toBe('2026-11-03T14:30:00.000Z');
+  });
+
+  it('requires intentional selective disclosure to be public simultaneously', () => {
+    const missingConfirmation = k8({ items: ['7.01'], regFd: { selectiveDisclosure: 'intentional' } });
+    expect(errors(usPolicy.validate(input('form_8k', missingConfirmation)))).toEqual(['US_REG_FD_SIMULTANEOUS']);
+
+    const confirmed = k8({ items: ['7.01'], regFd: { selectiveDisclosure: 'intentional', publicDisclosureSimultaneous: true } });
+    expect(errors(usPolicy.validate(input('form_8k', confirmed)))).toEqual([]);
   });
 
   it('sets no Form 8-K deadline when only voluntary Items 7.01 and 8.01 are reported', () => {

@@ -108,9 +108,12 @@ export const resultsRules = (tz: string): Rule<ResultsMeta>[] => [
 ];
 
 function addMonths(civil: CivilDate, months: number): CivilDate {
-  const d = new Date(`${civil}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  return d.toISOString().slice(0, 10);
+  const [year, month, day] = civil.split('-').map(Number) as [number, number, number];
+  const targetStart = new Date(Date.UTC(year, month - 1 + months, 1));
+  const targetYear = targetStart.getUTCFullYear();
+  const targetMonth = targetStart.getUTCMonth();
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, targetMonth, Math.min(day, lastDay))).toISOString().slice(0, 10);
 }
 
 /** Annual report within 4 months of year end, half-year report within 3 months of period end. */

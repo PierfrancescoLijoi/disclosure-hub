@@ -69,7 +69,7 @@ Author (IR team), Approver (company secretary, general counsel, CFO), Publisher 
 - BR-2 (UK) The issuer publishes a PDMR dealing within 3 business days of the transaction (MAR Art. 19(3)); the clock starts at the transaction, not when the issuer was told. A PDMR who told the issuer later than 3 business days after the transaction (Art. 19(1)) raises a warning.
 - BR-3 (UK) Inside-information announcements need two approvals including the company secretary; others need one.
 - BR-4 (US) A domestic filer's Form 8-K is due 4 business days after the triggering event; late is a warning, not a block. Items 7.01 and 8.01 are voluntary, so an 8-K that reports only those has no deadline. Item 1.05 (cybersecurity) counts the 4 business days from the materiality determination, which the author must record. Item 5.07 (votes) follows the standard clock.
-- BR-5 (US) Item 2.02 needs Exhibit 99.1 and is furnished, not filed; Item 7.01 (Reg FD) carries intentional vs unintentional selective disclosure; unintentional needs prompt disclosure (later of 24 hours or the next NYSE open after the senior official learned of it, today's open if it has not happened yet).
+- BR-5 (US) Item 2.02 needs Exhibit 99.1 and is furnished, not filed; Item 7.01 (Reg FD) carries intentional vs unintentional selective disclosure; intentional disclosure requires confirmation that public disclosure is simultaneous, while unintentional disclosure is due by the later of 24 hours or the next day's NYSE open.
 - BR-6 (US) 8-K needs two approvals including legal.
 - BR-7 Filings accepted after 17:30 ET carry the next business day as filing date.
 - BR-8 Approvals are void when the content changes.
@@ -104,5 +104,5 @@ Simplified on purpose. A compliance expert should expect to hear these first:
 - No correction or supplementary announcement after publication: published and withdrawn are terminal.
 - One announcement for a dual-listed issuer is two independent announcements; they are not linked.
 - UK MAR items not modelled: insider lists (Art. 18), closed periods for PDMRs (Art. 19(11)), the 20,000 euro dealing threshold (Art. 19(8)), the FCA notification of a delay as a tracked task rather than a post-publication reminder, and DTR 5 major-holdings notifications (TR-1).
-- US items not modelled: Forms 10-Q and 10-K, Section 16 forms, other 8-K items beyond 1.01, 1.05, 2.02, 5.02, 5.07, 7.01 and 8.01, and a Reg FD intentional disclosure (which requires simultaneous public disclosure) as a timed duty.
+- US items not modelled: Forms 10-Q and 10-K, Section 16 forms, and other 8-K items beyond 1.01, 1.05, 2.02, 5.02, 5.07, 7.01 and 8.01.
 - The AI pre-check is advisory; liability for the disclosure stays with the issuer.

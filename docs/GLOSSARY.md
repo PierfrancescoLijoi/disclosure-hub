@@ -126,7 +126,7 @@ describe the **simplified model** in this repository, not the law (see the discl
 | **Form 8-K / Item** | The current report for domestic filers, due 4 business days after the event. Items modelled: 1.01, 1.05, 2.02, 5.02, 5.07, 7.01, 8.01. |
 | **Form 6-K** | The report foreign private issuers file, promptly, with no fixed deadline. |
 | **Filer status** | Domestic filer or foreign private issuer; gates 8-K against 6-K. |
-| **Reg FD** | Regulation Fair Disclosure: selective disclosure must be made public (promptly if unintentional: later of 24 hours or the next NYSE open). |
+| **Reg FD** | Regulation Fair Disclosure: an intentional selective disclosure must be public simultaneously; an unintentional one promptly, no later than the later of 24 hours or the next day's NYSE open. |
 | **Exhibit 99.1** | The attachment item 2.02 requires; modelled only as a required flag. |
 | **CIK / CCC / accession number** | EDGAR identifiers: the company key, its confirmation code, and the number of an accepted filing. |
 | **Furnished vs filed** | Items 2.02 and 7.01 are furnished rather than filed (not subject to certain liabilities); modelled as extra details and notes, not as a legal effect. |
