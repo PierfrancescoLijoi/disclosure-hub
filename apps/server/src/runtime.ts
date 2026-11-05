@@ -5,7 +5,7 @@ import { PgNotifyQueue } from './adapters/queue/pg-notify.js';
 import { connect, migrateToLatest, type Connection } from './adapters/db/connect.js';
 import { createStore } from './adapters/db/kysely-store.js';
 import type { DB } from './adapters/db/schema.js';
-import { MockEdgarGateway, MockRnsGateway } from './adapters/gateways/mock.js';
+import { MockEdgarGateway, MockNasdaqCphGateway, MockRnsGateway } from './adapters/gateways/mock.js';
 import { createPreCheckProvider } from './adapters/ai/index.js';
 import { AnnouncementService } from './application/announcements.js';
 import { agentConsumer, preCheckAgent, type AdvisoryAgent } from './application/agents.js';
@@ -109,7 +109,7 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
   const readConnection = config.READ_DATABASE_URL && !o.connection ? connect(config.READ_DATABASE_URL, config.DATABASE_AUTH) : undefined;
   const publicRead = readConnection ? createStore(readConnection.db) : undefined;
   const policies = o.policies ?? defaultPolicies();
-  const gateways = o.gateways ?? new GatewayRegistry().register(new MockRnsGateway(db, clock)).register(new MockEdgarGateway(db, clock));
+  const gateways = o.gateways ?? new GatewayRegistry().register(new MockRnsGateway(db, clock)).register(new MockEdgarGateway(db, clock)).register(new MockNasdaqCphGateway(db, clock));
   const queue =
     o.queue ??
     (config.QUEUE_URL === 'inproc'
@@ -187,6 +187,7 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
 
   let sweeper: NodeJS.Timeout | undefined;
   let poller: NodeJS.Timeout | undefined;
+  let queueReport: NodeJS.Timeout | undefined;
   let outboxReport: NodeJS.Timeout | undefined;
   let outboxPrune: NodeJS.Timeout | undefined;
   let draining: Promise<void> | undefined;
@@ -207,7 +208,7 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
     preCheck,
     log,
     async start() {
-      // Two independent jobs, so each scales on its own signal: publishing (queue depth) and events (outbox lag).
+      // Two independent jobs, so each runs (and is watched) on its own: publishing (oldest waiting publication) and events (outbox lag).
       if (config.ROLE === 'worker' || config.ROLE === 'all') {
         await queue.start(async (id) => {
           await runner.run(id);
@@ -216,6 +217,15 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
         await sweep();
         sweeper = setInterval(sweep, config.SWEEP_INTERVAL_MS);
         sweeper.unref();
+        // CPU cannot see a publishing backlog (the worker waits on the vendor, it does not compute), so the age of the
+        // oldest due publication is logged here and Azure alerts on it (monitoring.tf), same pattern as the outbox.
+        const reportQueue = () =>
+          store.stats(clock.now().toISOString()).then(
+            (s) => log.info({ oldestWaitingSeconds: s.oldestWaitingSeconds }, 'publication-queue'),
+            (err) => log.error({ err }, 'publication-queue stats failed'),
+          );
+        queueReport = setInterval(reportQueue, OUTBOX_REPORT_MS);
+        queueReport.unref();
       }
       if (config.ROLE === 'events' || config.ROLE === 'all') {
         // One pass at a time: a slow consumer must not make the ticks pile up and exceed WORKER_CONCURRENCY.
@@ -247,6 +257,7 @@ export async function createRuntime(config: Config, o: RuntimeOverrides = {}): P
     },
     async close() {
       if (sweeper) clearInterval(sweeper);
+      if (queueReport) clearInterval(queueReport);
       if (poller) clearInterval(poller);
       if (outboxReport) clearInterval(outboxReport);
       if (outboxPrune) clearInterval(outboxPrune);

@@ -108,11 +108,14 @@ describe('REST end to end', () => {
   it('describes jurisdictions so a UI can build forms from the schemas', async () => {
     const res = await call(undefined, 'GET', '/api/config');
     expect(res.status).toBe(200);
-    expect(res.body.jurisdictions.map((j: any) => j.code)).toEqual(['UK', 'US']);
+    expect(res.body.jurisdictions.map((j: any) => j.code)).toEqual(['UK', 'US', 'DK']);
     const uk = res.body.jurisdictions[0];
     expect(uk.channel.id).toBe('rns');
     const inside = uk.categories.find((c: any) => c.key === 'inside_information');
     expect(inside.jsonSchema.properties.personResponsible.properties.name.type).toBe('string');
+    const dk = res.body.jurisdictions[2];
+    expect(dk.channel.id).toBe('cph');
+    expect(dk.categories.find((c: any) => c.key === 'general').jsonSchema.properties.language.enum).toEqual(['da', 'en']);
     expect(res.body.ai).toEqual({ provider: 'mock-heuristic-v1' });
     expect((await call(undefined, 'GET', '/api/users')).body.users.length).toBeGreaterThan(3);
   });

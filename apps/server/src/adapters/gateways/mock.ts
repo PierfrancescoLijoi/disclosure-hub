@@ -2,7 +2,7 @@ import type { Kysely } from 'kysely';
 import { addBusinessDays, civilOf, isBusinessDay, minutesOfDay } from '../../domain/calendar.js';
 import type { DistributionPayload } from '../../domain/types.js';
 import { US_FEDERAL_HOLIDAYS } from '../../jurisdictions/calendars.js';
-import { isValidCcc, isValidCik } from '../../jurisdictions/identifiers.js';
+import { isValidCcc, isValidCik, isValidCvr, isValidLei } from '../../jurisdictions/identifiers.js';
 import { GatewayError, type Clock, type PublishAck, type PublishGateway } from '../../ports/index.js';
 import type { DB } from '../db/schema.js';
 
@@ -176,6 +176,32 @@ export class MockEdgarGateway extends MockGateway {
       externalRef: accession,
       filingDate,
       detail: { service: 'EDGAR', accessionNumber: accession, formType: p.attributes.formType, status: 'accepted', filingDate },
+    };
+  }
+}
+
+/** Nasdaq Copenhagen company announcements. The number is per channel here; the real one is per issuer and year. */
+export class MockNasdaqCphGateway extends MockGateway {
+  constructor(db: Kysely<DB>, clock: Clock) {
+    super(db, clock, 'cph');
+  }
+
+  protected check(p: DistributionPayload): void {
+    const a = p.attributes;
+    if (!isValidCvr(String(a.cvr)) || !isValidLei(String(a.lei))) {
+      throw new GatewayError('permanent', 'CPH_REJECTED', 'Nasdaq Copenhagen requires a valid CVR number and LEI');
+    }
+    if (a.language !== 'da' && a.language !== 'en') {
+      throw new GatewayError('permanent', 'CPH_REJECTED', 'Company announcements must be in Danish or English');
+    }
+    if (!p.content.trim()) throw new GatewayError('permanent', 'CPH_REJECTED', 'Empty announcement');
+  }
+
+  protected receipt(p: DistributionPayload, seq: number, now: Date): Omit<PublishAck, 'acceptedAt'> {
+    const number = `${seq}/${now.getUTCFullYear()}`;
+    return {
+      externalRef: number,
+      detail: { service: 'Nasdaq Copenhagen', companyAnnouncementNumber: number, cvr: p.attributes.cvr, language: p.attributes.language, oam: 'Finanstilsynet', headline: p.headline },
     };
   }
 }

@@ -119,6 +119,7 @@ export async function addUser(env: Env, id: string, issuerId: string, roles: Act
 
 const todayUk = () => civilOf(new Date(), 'Europe/London');
 const todayNy = () => civilOf(new Date(), 'America/New_York');
+const todayCph = () => civilOf(new Date(), 'Europe/Copenhagen');
 const CONTACT = 'Enquiries: Investor Relations, ir@northwind.example, +44 20 7946 0000.';
 const LONG = 'The Board of Northwind Energy plc announces an update for shareholders and the wider market. '.repeat(3);
 
@@ -157,6 +158,37 @@ export const fx = {
       transactionDate: todayUk(),
       venue: 'XLON',
       notifiedAt: todayUk(),
+    },
+  }),
+  dkInside: (): CreateInput => ({
+    jurisdiction: 'DK',
+    category: 'inside_information',
+    headline: 'Trading update',
+    body: `${LONG}\n${CONTACT}`,
+    metadata: {
+      language: 'en',
+      informationBecameKnownAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+      personResponsible: { name: 'Bob Chen', title: 'Company Secretary' },
+    },
+  }),
+  dkPdmr: (): CreateInput => ({
+    jurisdiction: 'DK',
+    category: 'pdmr_dealing',
+    headline: 'Managers transactions',
+    body: `Notification of a transaction by a person discharging managerial responsibilities.\n${CONTACT}`,
+    metadata: {
+      language: 'da',
+      pdmrName: 'Dan Okafor',
+      position: 'Chief Financial Officer',
+      instrument: 'Ordinary shares',
+      isin: 'DK0010244425',
+      transactionType: 'acquisition',
+      price: 120,
+      currency: 'DKK',
+      volume: 2000,
+      transactionDate: todayCph(),
+      venue: 'XCSE',
+      notifiedAt: todayCph(),
     },
   }),
   usEarnings: (): CreateInput => ({

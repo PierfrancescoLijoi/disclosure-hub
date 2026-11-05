@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ruleContext } from '../src/application/announcements.js';
 import type { Announcement, Issuer, Revision } from '../src/domain/types.js';
-import { makeLei } from '../src/jurisdictions/identifiers.js';
+import { dkPolicy } from '../src/jurisdictions/dk.js';
+import { isValidCvr, makeLei } from '../src/jurisdictions/identifiers.js';
 import { ukPolicy } from '../src/jurisdictions/uk.js';
 import { usPolicy } from '../src/jurisdictions/us.js';
 
@@ -13,6 +14,7 @@ const issuer: Issuer = {
   profiles: {
     UK: { tidm: 'NWE', lei: makeLei('5299000NORTHWINDEN') },
     US: { cik: '0001234567', ccc: 'nw3n3rgy', ticker: 'NWEY', filerStatus: 'domestic' },
+    DK: { cvr: '12345674', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE' },
   },
 };
 
@@ -279,5 +281,94 @@ describe('US policy', () => {
     const saturday = usPolicy.timing(context(usPolicy, 'form_8k', k8(), new Date('2026-11-07T15:00:00Z')));
     expect(saturday.window.open).toBe(false);
     expect(saturday.window.nextOpenAt?.toISOString()).toBe('2026-11-09T11:00:00.000Z');
+  });
+});
+
+describe('Denmark policy (EU MAR, Nasdaq Copenhagen)', () => {
+  const person = { name: 'Bob Chen', title: 'Company Secretary' };
+  const dealing = (over: Record<string, unknown> = {}) => ({
+    language: 'en',
+    pdmrName: 'Dan Okafor',
+    position: 'Chief Financial Officer',
+    instrument: 'Ordinary shares',
+    isin: 'DK0010244425',
+    transactionType: 'acquisition',
+    price: 100,
+    currency: 'DKK',
+    volume: 2000,
+    transactionDate: '2026-11-03',
+    venue: 'XCSE',
+    notifiedAt: '2026-11-03',
+    ...over,
+  });
+
+  it('checks a CVR number with the modulus 11 rule', () => {
+    expect(isValidCvr('12345674')).toBe(true);
+    expect(isValidCvr('12345675')).toBe(false);
+    expect(isValidCvr('1234567')).toBe(false);
+  });
+
+  it('needs the language of the announcement, Danish or English, in every category', () => {
+    const issues = dkPolicy.validate(input('general', {}));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['SCHEMA_INVALID', 'metadata.language']]);
+    expect(dkPolicy.validate(input('general', { language: 'da' }))).toEqual([]);
+    expect(codes(dkPolicy.validate(input('general', { language: 'sv' })))).toEqual(['SCHEMA_INVALID']);
+  });
+
+  it('checks the issuer has a valid CVR number and LEI', () => {
+    const badCvr: Issuer = { ...issuer, profiles: { DK: { cvr: '12345675', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE' } } };
+    expect(codes(dkPolicy.validate(input('general', { language: 'en' }, { issuer: badCvr })))).toContain('ISSUER_PROFILE_INCOMPLETE');
+  });
+
+  it('shares the MAR rules with the UK under its own codes', () => {
+    const known = new Date(NOW.getTime() - 90 * 60_000).toISOString();
+    const issues = dkPolicy.validate(input('inside_information', { language: 'en', informationBecameKnownAt: known, personResponsible: person }));
+    expect(issues.map((i) => [i.code, i.severity])).toEqual([['EU_MAR_ASAP', 'warning']]);
+    const short = { language: 'en', informationBecameKnownAt: known, personResponsible: person, delayedDisclosure: { decidedAt: known, justification: 'too short' } };
+    expect(errors(dkPolicy.validate(input('inside_information', short)))).toEqual(['EU_MAR_DELAY_JUSTIFICATION']);
+  });
+
+  it('counts the PDMR deadline in Danish business days: Ascension Day is not one', () => {
+    const on = new Date('2026-05-13T12:00:00Z');
+    const t = dkPolicy.timing(context(dkPolicy, 'pdmr_dealing', dealing({ transactionDate: '2026-05-13', notifiedAt: '2026-05-13' }), on));
+    expect(t.deadline?.at?.toISOString()).toBe('2026-05-19T21:59:00.000Z'); // Thu 14 May is closed: due Tue 19 May, 23:59 in Copenhagen (CEST)
+    const uk = ukPolicy.timing(context(ukPolicy, 'pdmr_dealing', { ...dealing(), isin: 'GB0007980591', currency: 'GBP', transactionDate: '2026-05-13', notifiedAt: '2026-05-13' }, on));
+    expect(uk.deadline?.at?.toISOString()).toBe('2026-05-18T22:59:00.000Z'); // the same MAR rule, a different calendar: Mon 18 May
+  });
+
+  it('warns, without blocking, when a dealing is under the notification threshold', () => {
+    const small = dkPolicy.validate(input('pdmr_dealing', dealing({ price: 10, volume: 100 })));
+    expect(small.map((i) => [i.code, i.severity])).toEqual([['EU_MAR_PDMR_BELOW_THRESHOLD', 'warning']]);
+    expect(dkPolicy.validate(input('pdmr_dealing', dealing()))).toEqual([]);
+    expect(errors(dkPolicy.validate(input('pdmr_dealing', dealing({ isin: 'DK0010244420' }))))).toEqual(['INVALID_ISIN']);
+  });
+
+  it('renders the MAR statement in the language of the announcement and carries the CVR number', () => {
+    const meta = { informationBecameKnownAt: '2026-11-03T11:30:00Z', personResponsible: person };
+    const en = dkPolicy.render(context(dkPolicy, 'inside_information', { ...meta, language: 'en' }));
+    expect(en.channel).toBe('cph');
+    expect(en.content).toContain('contains inside information');
+    expect(en.content).toContain('Bob Chen, Company Secretary');
+    const da = dkPolicy.render(context(dkPolicy, 'inside_information', { ...meta, language: 'da' }));
+    expect(da.content).toContain('insiderinformation');
+    expect(da.attributes).toMatchObject({ cvr: '12345674', language: 'da', insideInformation: 'true' });
+    expect(dkPolicy.render(context(dkPolicy, 'general', { language: 'da' })).content).not.toContain('insiderinformation');
+  });
+
+  it('asks for the Finanstilsynet notice only when disclosure was delayed', () => {
+    const base = { language: 'en', informationBecameKnownAt: '2026-11-03T10:00:00Z', personResponsible: person };
+    const plain = dkPolicy.postPublication(context(dkPolicy, 'inside_information', base));
+    expect(plain.join(' ')).toContain('OAM');
+    expect(plain.join(' ')).not.toContain('delay');
+    const delayed = dkPolicy.postPublication(context(dkPolicy, 'inside_information', { ...base, delayedDisclosure: { decidedAt: '2026-11-03T10:00:00Z', justification: 'x'.repeat(40) } }));
+    expect(delayed.join(' ')).toContain('delay');
+  });
+
+  it('reports the Copenhagen window and keeps inside information releasable outside it', () => {
+    const closed = dkPolicy.timing(context(dkPolicy, 'general', { language: 'en' }, new Date('2026-11-03T04:30:00Z'))); // 05:30 Copenhagen
+    expect(closed.window.open).toBe(false);
+    expect(closed.window.nextOpenAt?.toISOString()).toBe('2026-11-03T06:00:00.000Z');
+    const inside = dkPolicy.timing(context(dkPolicy, 'inside_information', { language: 'en', informationBecameKnownAt: '2026-11-03T03:00:00Z', personResponsible: person }, new Date('2026-11-03T04:30:00Z')));
+    expect(inside.holdWhenClosed).toBe(false);
   });
 });

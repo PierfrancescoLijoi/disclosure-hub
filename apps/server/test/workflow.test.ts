@@ -88,6 +88,37 @@ describe('draft to published, UK', () => {
   });
 });
 
+describe('draft to published, Denmark', () => {
+  it('publishes a Danish PDMR notification through Nasdaq Copenhagen with a company announcement number', async () => {
+    const { alice, bob } = env.actors;
+    const id = await toApproved(fx.dkPdmr(), [bob]);
+    const view = await publishAndSettle(id);
+    expect(view.announcement.status).toBe('published');
+    expect(view.publication?.externalRef).toMatch(/^1\/\d{4}$/);
+    expect(view.obligations.join(' ')).toContain('OAM');
+    const detail = JSON.parse((await receipts('cph'))[0]!.detail);
+    expect(detail).toMatchObject({ service: 'Nasdaq Copenhagen', cvr: '12345674', language: 'da' });
+    expect((await env.svc.auditTrail(alice, id)).chain).toEqual({ ok: true });
+  });
+
+  it('retries a transient Copenhagen failure without a second release', async () => {
+    const id = await toApproved(fx.dkPdmr(), [env.actors.bob]);
+    await setChaos('cph', { mode: 'transient', failuresRemaining: 2 });
+    const view = await publishAndSettle(id);
+    expect(view.announcement.status).toBe('published');
+    expect(await receipts('cph')).toHaveLength(1);
+  });
+
+  it('refuses to publish when the Danish language field is missing', async () => {
+    const input = fx.dkPdmr();
+    delete (input.metadata as Record<string, unknown>).language;
+    const { id } = await env.svc.create(env.actors.alice, input);
+    const v = await env.svc.validate(env.actors.alice, id);
+    expect(v.ok).toBe(false);
+    expect(v.report.issues.map((i) => i.path)).toContain('metadata.language');
+  });
+});
+
 describe('draft to published, US', () => {
   it('publishes an earnings 8-K once legal and the CFO have each approved', async () => {
     const { alice, bob, carol, dan, erin } = env.actors;

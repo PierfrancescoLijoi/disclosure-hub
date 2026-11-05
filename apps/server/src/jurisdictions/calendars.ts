@@ -28,3 +28,11 @@ export const NYSE_HOLIDAYS: Calendar = {
     '2027-09-06', '2027-11-25', '2027-12-24',
   ]),
 };
+
+/** Nasdaq Copenhagen closing days (Danish business days for MAR deadlines). Great Prayer Day is no longer a holiday (2024). */
+export const DK_HOLIDAYS: Calendar = {
+  holidays: new Set([
+    '2026-01-01', '2026-04-02', '2026-04-03', '2026-04-06', '2026-05-14', '2026-05-25', '2026-12-24', '2026-12-25', '2026-12-31',
+    '2027-01-01', '2027-03-25', '2027-03-26', '2027-03-29', '2027-05-06', '2027-05-17', '2027-12-24', '2027-12-31',
+  ]),
+};

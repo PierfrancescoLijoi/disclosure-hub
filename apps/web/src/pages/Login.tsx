@@ -6,7 +6,7 @@ import { useSession } from '../session';
 import { Banner, Logo, Skeleton } from '../ui';
 
 const POINTS = [
-  'One governed path from draft to published, for the UK (RNS) and the US (EDGAR).',
+  'One governed path from draft to published, for the UK (RNS), the US (EDGAR) and Denmark (Nasdaq Copenhagen).',
   'Maker-checker approval bound to the exact text that was approved.',
   'Publishing that survives a dropped acknowledgement: no duplicates, a full audit trail.',
 ];

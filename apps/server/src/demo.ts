@@ -37,6 +37,22 @@ const flows = [
     },
     approvers: ['bob', 'carol', 'dan'],
   },
+  {
+    title: 'DK  Nasdaq Copenhagen  inside information (EU MAR Art. 17), in Danish',
+    draft: {
+      jurisdiction: 'DK',
+      category: 'inside_information',
+      headline: 'Opjustering af forventningerne til regnskabsåret 2026',
+      body: `Northwind Energy plc opjusterer forventningerne til året: omsætning og justeret EBITDA ligger over bestyrelsens forventninger.
+${CONTACT}`,
+      metadata: {
+        language: 'da',
+        informationBecameKnownAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+        personResponsible: { name: 'Bob Chen', title: 'Company Secretary' },
+      },
+    },
+    approvers: ['bob', 'carol'],
+  },
 ];
 
 async function waitPublished(id: string) {
@@ -73,4 +89,4 @@ for (const flow of flows) {
   console.log(`audit   ${audit.events.length} events, hash chain ${audit.chain.ok ? 'verified' : 'BROKEN'}: ${audit.events.map((e: any) => e.type).join(' > ')}`);
   if (done.announcement.status !== 'published') process.exitCode = 1;
 }
-console.log(process.exitCode ? '\nDemo finished with failures.' : '\nBoth jurisdictions published.');
+console.log(process.exitCode ? '\nDemo finished with failures.' : '\nAll three jurisdictions published.');

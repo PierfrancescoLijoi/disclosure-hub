@@ -1,15 +1,12 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { z } from 'zod';
 import { AnthropicPreCheckProvider } from '../src/adapters/ai/anthropic.js';
 import { PreCheckService } from '../src/application/precheck.js';
 import { DomainError } from '../src/domain/errors.js';
-import { definePolicy } from '../src/domain/policy.js';
-import type { DistributionPayload } from '../src/domain/types.js';
-import { defaultPolicies } from '../src/jurisdictions/index.js';
-import { GatewayRegistry, type PublishAck, type PublishGateway } from '../src/ports/index.js';
-import { addUser, FakeClock, fx, makeEnv, silent, type Env } from './helpers.js';
+import { PolicyRegistry } from '../src/domain/policy.js';
+import { dkPolicy } from '../src/jurisdictions/dk.js';
+import { FakeClock, fx, makeEnv, silent, type Env } from './helpers.js';
 
 let env: Env | undefined;
 afterEach(async () => {
@@ -78,50 +75,25 @@ describe('release windows', () => {
 });
 
 describe('adding a jurisdiction', () => {
-  it('runs a new country through the unchanged workflow with one policy and one gateway', async () => {
-    const policy = definePolicy({
-      code: 'XX',
-      name: 'Examplestan',
-      timezone: 'UTC',
-      channel: { id: 'xxwire', name: 'XX Wire' },
-      issuerProfile: z.object({ registry: z.string().min(1) }).catchall(z.string()),
-      headlineMax: 80,
-      calendar: { holidays: new Set() },
-      window: { open: '00:00', close: '23:59' },
-      categories: { notice: { label: 'Notice', schema: z.object({}), approval: { min: 1, mustInclude: [] } } },
-      render: ({ headline, body }): DistributionPayload => ({ channel: 'xxwire', headline, content: body, attributes: {}, attachments: [] }),
-      postPublication: () => ['Archive locally'],
-    });
-    const sent = new Map<string, PublishAck>();
-    const gateway: PublishGateway = {
-      channel: 'xxwire',
-      async find(key) {
-        return sent.get(key) ?? null;
-      },
-      async submit({ idempotencyKey }) {
-        const ack = { externalRef: `XX-${sent.size + 1}`, acceptedAt: new Date().toISOString(), detail: {} };
-        sent.set(idempotencyKey, ack);
-        return ack;
-      },
-    };
-    env = await makeEnv({ policies: defaultPolicies().register(policy), gateways: new GatewayRegistry().register(gateway) });
+  it('runs Denmark through the unchanged workflow when its policy is the only one registered', async () => {
+    env = await makeEnv({ policies: new PolicyRegistry().register(dkPolicy) });
+    expect(env.rt.policies.list().map((p) => p.code)).toEqual(['DK']);
+    const { alice, bob, carol, erin } = env.actors;
 
-    await env.rt.db.insertInto('issuers').values({ id: 'examplecorp', name: 'Example Corp', profiles: JSON.stringify({ XX: { registry: 'R-1' } }) }).execute();
-    const author = await addUser(env, 'xa', 'examplecorp', ['author']);
-    const approver = await addUser(env, 'xb', 'examplecorp', ['company_secretary']);
-    const publisher = await addUser(env, 'xc', 'examplecorp', ['publisher']);
-
-    const { id } = await env.svc.create(author, { jurisdiction: 'XX', category: 'notice', headline: 'Hello market', body: 'First announcement.', metadata: {} });
-    await env.svc.validate(author, id);
-    await env.svc.submit(author, id);
-    await env.svc.approve(approver, id);
-    await env.svc.publish(publisher, id);
+    const { id } = await env.svc.create(alice, fx.dkInside());
+    await env.svc.validate(alice, id);
+    await env.svc.submit(alice, id);
+    await env.svc.approve(bob, id);
+    await env.svc.approve(carol, id);
+    await env.svc.publish(erin, id);
     await env.settle();
 
-    const view = await env.svc.get(publisher, id);
+    const view = await env.svc.get(erin, id);
     expect(view.announcement.status).toBe('published');
-    expect(view.publication?.externalRef).toBe('XX-1');
-    expect(view.obligations).toEqual(['Archive locally']);
+    expect(view.publication?.externalRef).toMatch(/^1\/\d{4}$/);
+    expect(view.obligations.join(' ')).toContain('OAM');
+    const uk = await env.svc.create(alice, fx.ukGeneral()).catch((e: unknown) => e);
+    expect(uk).toMatchObject({ status: 422, code: 'UNKNOWN_JURISDICTION' });
   });
 
   it('rejects a jurisdiction nobody registered', async () => {

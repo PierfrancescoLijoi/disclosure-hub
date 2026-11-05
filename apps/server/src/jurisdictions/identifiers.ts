@@ -46,3 +46,9 @@ export const isValidTidm = (s: string) => /^[A-Z0-9]{2,5}$/.test(s);
 export const isValidCik = (s: string) => /^\d{10}$/.test(s);
 /** EDGAR CIK Confirmation Code: 8 characters. */
 export const isValidCcc = (s: string) => /^[A-Za-z0-9@#$*]{8}$/.test(s);
+/** Danish CVR number: 8 digits, weighted sum with 2,7,6,5,4,3,2,1 must be divisible by 11. */
+export function isValidCvr(s: string): boolean {
+  if (!/^\d{8}$/.test(s)) return false;
+  const weights = [2, 7, 6, 5, 4, 3, 2, 1];
+  return [...s].reduce((sum, d, i) => sum + Number(d) * weights[i]!, 0) % 11 === 0;
+}
