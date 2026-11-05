@@ -106,9 +106,10 @@ ARCHITECTURE.md §2.1 and [BRIEF-RESPONSE.md](BRIEF-RESPONSE.md#3-without-duplic
 4. Give each issuer the profile the policy asks for (`SEED_ISSUERS_JSON` or the seed).
 
 A new jurisdiction automatically appears in the composer menus, the detail form, the archive and activity filters, the
-publishing console and the follow form: they read the registered policies from the server. Optional, cosmetic:
-sample text for the "Fill with example content" button in `apps/web/src/examples.ts`, and the word "filing" for a new
-channel in `apps/web/src/labels.ts` (`SEND_NOUN`). Proof that no workflow file changes: `operations.test.ts`, "adding a
+publishing console and the follow form: they read the registered policies from the server. Optional, in the policy
+itself: an `example` per category (sample text for the "Fill with example content" button; see `uk.examples.ts`) and a
+`sendNoun` on the channel (the word "filing" for EDGAR). A test fails the build if the workflow, the API or the web app
+names a jurisdiction or channel. Proof that no workflow file changes: `operations.test.ts`, "adding a
 jurisdiction" (Denmark as the only registered one).
 
 ## Where things live

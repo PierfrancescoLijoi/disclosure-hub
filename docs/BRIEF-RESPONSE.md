@@ -46,7 +46,7 @@ Without a browser: `npm run demo` drives one announcement per jurisdiction throu
 the mail service locally, and the AI provider by default. Sign-in is real OIDC in the container setup and in the Azure
 design. Nothing is submitted to a regulator.
 
-**Evidence that it works:** 219 server tests pass on SQLite; 7 more are gated integration tests that CI runs with PostgreSQL 16 and Redis 7;
+**Evidence that it works:** 223 server tests pass on SQLite; 7 more are gated integration tests that CI runs with PostgreSQL 16 and Redis 7;
 12 UI logic tests pass. The workflow tests run the full path in all three jurisdictions; the container stack was
 run end to end with the demo and a benchmark. See [ARCHITECTURE.md §6](ARCHITECTURE.md#6-verified-and-only-designed).
 
@@ -171,8 +171,9 @@ refused with a clear error; `workflow.test.ts` covers Denmark end to end, includ
 - A jurisdiction whose **workflow shape** differs (for example a regulator pre-clearance step before release) needs a new
   transition, not only a policy. That is the first thing the next jurisdiction may force
   ([ARCHITECTURE §3](ARCHITECTURE.md#3-trade-offs-i-accepted)).
-- Two cosmetic places still list jurisdictions: `apps/web/src/examples.ts` (sample text for the "Fill with example
-  content" button, optional) and `labels.ts` `SEND_NOUN` (the word "filing" for EDGAR; the default is "distribution").
+- Nothing in the UI or the workflow names a jurisdiction any more: the sample text for the "Fill with example content"
+  button and the word a channel uses for sending ("filing" for EDGAR) are fields of the policy, and a test fails the
+  build if `domain`, `application`, `http`, `ports`, `auth` or the web app contain a jurisdiction or channel name.
 - The demo data, benchmarks and the mock-AI rules name the jurisdictions; they are not logic. The AI pre-check reads Danish and English wording and flags a language mismatch.
 - All three jurisdictions are models. The Danish thresholds (flagging levels, notice periods, the managers' transaction limit), hours and wording are assumptions to confirm with Danish counsel before real use, as the UK and US ones are for their own counsel.
 - Policies are code, reviewed in a pull request. Policies from a database or an admin UI for non-engineers are a listed

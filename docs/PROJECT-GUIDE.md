@@ -205,8 +205,9 @@ main market or First North (which needs a Certified Adviser and has no sharehold
 (annual) or 14 (extraordinary) before the meeting for the notice. The company announcement number is per issuer and year
 (`n/year`), as in reality, and stays unique even with simultaneous publications.
 
-Two cosmetic places still have to be updated by hand: `apps/web/src/examples.ts` (sample text for the "Fill with example content"
-button) and `labels.ts` (`SEND_NOUN`, the word "filing" for EDGAR).
+Nothing in the UI names a jurisdiction: the sample text for the "Fill with example content" button (`<code>.examples.ts` next to
+each policy) and the word a channel uses for sending (`sendNoun`, "filing" for EDGAR) belong to the policy, and an architecture
+test fails the build if the workflow, the API or the web app names a jurisdiction or channel.
 
 ---
 
@@ -366,7 +367,7 @@ for each person (run `npm install` once on the host first).
 | Full start | `bootstrap.cmd` or `sh bootstrap.sh` |
 | Prepare only | `bootstrap.cmd -NoStart` / `sh bootstrap.sh --no-start` |
 | Demo through the API | `npm run demo` (or `bootstrap.cmd -Demo`) |
-| Tests | `npm test` (219 server plus 12 web), `npm run typecheck` |
+| Tests | `npm test` (223 server plus 12 web), `npm run typecheck` |
 | Benchmark | `npm run bench`, `npm run bench:readers -w apps/server` |
 | Start from scratch | delete `apps/server/data/` |
 | Another port | `PORT=3001 npm start` (PowerShell: `$env:PORT=3001; npm start`) |
@@ -572,7 +573,7 @@ Cut in this order to protect the complete flow, the quality of the tests and the
 |---|---|
 | Draft→published in the UK, US and Denmark, from the UI, the REST demo and the tests | **Verified by running it** |
 | Retries, exhaustion, permanent rejection, lost acknowledgement, lease takeover after a crash, recovery of a lost wake-up | **Verified** (tests) |
-| 219 tests on SQLite; 7 gated integration tests run in CI with PostgreSQL 16 + Redis 7, including two worker processes with no double release | **Verified locally except the gated adapter tests; CI verifies the full 226** |
+| 223 tests on SQLite; 7 gated integration tests run in CI with PostgreSQL 16 + Redis 7, including two worker processes with no double release | **Verified locally except the gated adapter tests; CI verifies the full 226** |
 | OIDC with Keycloak, Authorization Code + PKCE from a real browser | **Verified** |
 | Compose twin: separate api, worker, notifier, agents; mail delivered to Mailpit; nginx cache | **Verified** |
 | Bootstrap from scratch on Windows and Linux (Node 22.12/22.23.4/24, refusal of Node 18/20, Docker from a fresh clone) | **Verified**; macOS, Docker on a Linux host and a truly clean Windows **not** tried |
@@ -605,7 +606,7 @@ Ordered by how hard a reviewer might push:
 7. **"Find before resending"** does not exist at real vendors.
 8. **The volume.** A lot of documentation and many features beyond the brief: you must be able to defend all of them.
 9. **The repo is private.** The reviewer must be given access or the ZIP.
-10. **You have two small cosmetic lists of jurisdictions** (`examples.ts`, `labels.ts`) that a pedantic reviewer will find.
+10. **The advisory mock AI still has per-jurisdiction rules** (`adapters/ai/mock.ts`). It cannot change any state, but a pedantic reviewer may ask why they are not in the policies.
 
 ---
 

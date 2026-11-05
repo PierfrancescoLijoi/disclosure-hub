@@ -36,12 +36,12 @@ Diagrams: [use cases](diagrams/01-use-cases.drawio.png), [Azure](diagrams/02-azu
 | Validation | Common checks in `definePolicy` (headline, empty body, placeholders, issuer profile, schema, deadline passed); business-day maths in `domain/calendar.ts`; identifier checks in `jurisdictions/identifiers.ts` | MAR rules and deadlines for inside information, managers' transactions and results (`mar.ts`, 122 lines), each policy supplying its own calendar, time zone and code prefix (`UK_MAR_*`, `EU_MAR_*`) | **Policy file:** `uk.ts` (97 lines), `us.ts` (248), `dk.ts` (383): categories and their fields, specific rules, deadlines, approvals, window, rendering, issuer profile |
 | Publishing | Runner (lease, retry, idempotency key, sweeper), the `PublishGateway` contract, the mock gateway base class (lookup by key, replay safety, failure modes) | | **Gateway subclass:** what the channel accepts and rejects, and its receipt (RNS number, EDGAR accession number, `n/year`) |
 | After publishing | Outbox, public archive, subscriptions, agents | | Post-publication obligations (in the policy) |
-| API and UI | Whole REST API and whole UI; forms are generated from each category's schema | | Nothing (menus and forms read the registered policies); sample text for the example button |
+| API and UI | Whole REST API and whole UI; forms are generated from each category's schema | | Nothing (menus and forms read the registered policies); the sample text for the example button and the channel's send word are fields of the policy |
 | Data | One migration, no jurisdiction column constraint | | Holiday calendar (`jurisdictions/calendars.ts`) and seed data for the issuer's identifiers |
 
 How they differ in substance (categories, deadlines, approvals, windows, identifiers, receipts) is tabulated in the
 [README](../README.md) and, with where each difference lives, in [BRIEF-RESPONSE §2](BRIEF-RESPONSE.md#2-regulatory-and-operational-differences-two-kinds-two-homes).
-The US does not share `mar.ts` because Form 8-K and Reg FD are a different regime, not another copy of MAR.
+A test fails the build if the workflow, the API or the web app names a jurisdiction or a channel. The US does not share `mar.ts` because Form 8-K and Reg FD are a different regime, not another copy of MAR.
 
 Adding a jurisdiction means writing only the right-hand column: one policy file, one gateway subclass, two registrations
 ([MODULES.md](MODULES.md#add-a-jurisdiction)).
@@ -72,7 +72,7 @@ Adding a jurisdiction means writing only the right-hand column: one policy file,
 ## What is proven and what is not
 
 - **Verified by running it:** draft to published in all three jurisdictions; retries, lost acknowledgement, crash and
-  takeover; 219 server tests on SQLite, with 7 PostgreSQL/Redis integration tests run by CI; real OIDC (Keycloak) in the container setup.
+  takeover; 223 server tests on SQLite, with 7 PostgreSQL/Redis integration tests run by CI; real OIDC (Keycloak) in the container setup.
 - **Measured on a laptop with Azure resource limits:** about 15 publications per second with 2 workers against an expected
   peak of 0.17 per second ([SIZING.md](SIZING.md)).
 - **Designed, never applied:** the Azure Terraform. It is validated offline (42 mocked tests, lint and security scans), and

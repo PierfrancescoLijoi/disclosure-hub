@@ -280,7 +280,7 @@ and run `AUTH=oidc GATEWAY_LATENCY_MS=200 N=200 CONCURRENCY=5 npm run bench`. Re
 ## Tests
 
 ```bash
-npm test               # 219 server tests pass (7 integration tests skipped without PostgreSQL/Redis), then 12 web tests
+npm test               # 223 server tests pass (7 integration tests skipped without PostgreSQL/Redis), then 12 web tests
 npm test -w apps/web   # run only the 12 UI logic tests (diff, attention queue, readiness)
 npm run typecheck
 ```
@@ -293,7 +293,7 @@ docker run -d --name hub-test-redis -p 56379:6379 redis:7-alpine
 
 TEST_PG_URL=postgres://hub:hub-dev-only@localhost:55432/hub_test \
 TEST_REDIS_URL=redis://localhost:56379 \
-npm test -w apps/server -- --no-file-parallelism     # all 226 server tests; CI runs this with PostgreSQL 16 + Redis 7
+npm test -w apps/server -- --no-file-parallelism     # all 230 server tests; CI runs this with PostgreSQL 16 + Redis 7
 ```
 
 With `TEST_PG_URL` every integration test runs on PostgreSQL (the schema is dropped and recreated per
