@@ -16,6 +16,24 @@ jurisdictions (UK, US and Denmark), with one shared workflow and per-jurisdictio
 > counsel and the real channel integrations. All three newswires are mocks. Sign-in is real OIDC in the container and Azure
 > setups (Keycloak locally, Microsoft Entra ID on Azure); `npm start` uses seeded personas for a zero-install demo.
 
+## Run it in 30 seconds
+
+With Node.js 22 or newer:
+
+```bash
+npm install
+npm start          # open http://localhost:3000
+```
+
+Then sign in as **alice** (author), create a UK, US or Denmark announcement, press *Fill with example content*, and take it
+through *Validate*, *Submit for review*, three approvals (bob, carol, dan) and *Publish* (erin). The full walk-through is under
+[Try it](#try-it). Without a browser: `npm run demo` (with the app running) publishes one announcement per jurisdiction.
+No Node.js yet? Use the bootstrap below, which installs nothing system-wide.
+
+**Reading order (about 10 minutes):** [docs/SUMMARY.md](docs/SUMMARY.md) (architecture, decisions, trade-offs, next steps on
+one page), then [docs/BRIEF-RESPONSE.md](docs/BRIEF-RESPONSE.md) (each point of the brief with its proof). Everything else is
+under [Additional details](#additional-details).
+
 ## Quick start from a clean computer
 
 Nothing needs to be installed first: no Node.js, no Git, no database, no Docker, no compiler, no Python, no account, no API
@@ -106,11 +124,20 @@ deployment) is stated in [BRIEF-RESPONSE §4](docs/BRIEF-RESPONSE.md#4-verified-
 
 ## Documentation map
 
-Start with the first two; the rest is reference.
+### Start here
 
 | Document | What it answers |
 |---|---|
+| [docs/SUMMARY.md](docs/SUMMARY.md) | Architecture, key decisions, trade-offs, what is proven, what comes next: one page |
 | [docs/BRIEF-RESPONSE.md](docs/BRIEF-RESPONSE.md) | The three points of the brief, each with its claim, proof and limit; likely questions |
+| [Azure diagram](docs/diagrams/02-azure-architecture.drawio.png) | The target architecture on one picture |
+
+### Additional details
+
+Reference material behind the pages above. Nothing here is needed to run or review the system.
+
+| Document | What it answers |
+|---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | Functional and non-functional requirements with status, assumptions, decisions, open points |
 | [docs/GLOSSARY.md](docs/GLOSSARY.md) | Every term (system, regulatory, cloud) with the file that defines it |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design, key decisions, trade-offs, scaling, what was cut, verified versus designed, next steps |
@@ -129,7 +156,7 @@ Start with the first two; the rest is reference.
 
 Diagrams (draw.io sources next to each PNG) are under [Diagrams](#diagrams).
 
-Short on time: README (this page), then BRIEF-RESPONSE, then the [Azure diagram](docs/diagrams/02-azure-architecture.drawio.png).
+Short on time: the run block above, then [docs/SUMMARY.md](docs/SUMMARY.md), then the [Azure diagram](docs/diagrams/02-azure-architecture.drawio.png).
 
 **For readers, not only staff.** Published announcements are public: an archive filterable by company, category, date and
 text (`/public/announcements`), an Atom feed per filter, and follow-by-email or signed webhook with double opt-in and
