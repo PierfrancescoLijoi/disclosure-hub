@@ -132,6 +132,38 @@ describe('AI pre-check is advisory', () => {
     expect(trail.chain).toEqual({ ok: true });
   });
 
+  it('applies the same MAR checks to Denmark under the EU regime and reads Danish wording', async () => {
+    env = await makeEnv();
+    const { alice } = env.actors;
+    const dk = fx.dkPdmr();
+    dk.headline = 'Opdatering om opkøb';
+    dk.body = 'Efter rygter i markedet bekræfter selskabet en nedjustering af forventningerne for året og et opkøb af en konkurrent. Henvendelser: ir@northwind.example';
+    const { id } = await env.svc.create(alice, dk);
+    const result = await env.rt.preCheck!.run(alice, id);
+    expect(result.report.classification.suggestedCategory).toBe('inside_information');
+    expect(result.report.risks.map((r) => [r.regime, r.code])).toEqual(expect.arrayContaining([['EU_MAR', 'EU_MAR_POSSIBLE_INSIDE_INFORMATION'], ['EU_MAR', 'EU_MAR_LEAK']]));
+  });
+
+  it('suggests the Danish categories that have no UK or US counterpart', async () => {
+    const e = (env = await makeEnv());
+    const suggest = async (input: ReturnType<typeof fx.dkHolding>, text: string) => {
+      const { id } = await e.svc.create(e.actors.alice, { ...input, body: `${text} Enquiries: ir@northwind.example` });
+      return (await e.rt.preCheck!.run(e.actors.alice, id)).report.classification.suggestedCategory;
+    };
+    expect(await suggest(fx.dkPdmr(), 'A shareholder has crossed the 10% threshold of voting rights in the Company.')).toBe('major_shareholding');
+    expect(await suggest(fx.dkPdmr(), 'The Company has bought treasury shares under its buyback programme.')).toBe('share_buyback');
+    expect(await suggest(fx.dkPdmr(), 'The Board convenes the annual general meeting.')).toBe('general_meeting');
+  });
+
+  it('notes when the declared language of a Danish announcement is not the language of the text', async () => {
+    env = await makeEnv();
+    const input = fx.dkPdmr(); // declares Danish
+    input.body = 'The Board of Directors of the Company has decided to propose a dividend to the shareholders, and the Company expects to pay it in the spring. Enquiries: ir@northwind.example';
+    const { id } = await env.svc.create(env.actors.alice, input);
+    const result = await env.rt.preCheck!.run(env.actors.alice, id);
+    expect(result.report.risks.map((r) => r.code)).toContain('DK_LANGUAGE_MISMATCH');
+  });
+
   it('flags Regulation FD risk for a briefing that may precede the release', async () => {
     env = await makeEnv();
     const input = fx.usOther();

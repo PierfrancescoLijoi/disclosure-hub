@@ -116,6 +116,10 @@ describe('REST end to end', () => {
     const dk = res.body.jurisdictions[2];
     expect(dk.channel.id).toBe('cph');
     expect(dk.categories.find((c: any) => c.key === 'general').jsonSchema.properties.language.enum).toEqual(['da', 'en']);
+    expect(dk.categories.map((c: any) => c.key)).toEqual(['inside_information', 'pdmr_dealing', 'results', 'major_shareholding', 'share_buyback', 'general_meeting', 'general']);
+    const holding = dk.categories.find((c: any) => c.key === 'major_shareholding').jsonSchema.properties;
+    expect(holding.threshold.enum).toContain('33.33%');
+    expect(holding.holder.properties.type.enum).toEqual(['natural_person', 'legal_entity']);
     expect(res.body.ai).toEqual({ provider: 'mock-heuristic-v1' });
     expect((await call(undefined, 'GET', '/api/users')).body.users.length).toBeGreaterThan(3);
   });

@@ -120,6 +120,7 @@ export async function addUser(env: Env, id: string, issuerId: string, roles: Act
 const todayUk = () => civilOf(new Date(), 'Europe/London');
 const todayNy = () => civilOf(new Date(), 'America/New_York');
 const todayCph = () => civilOf(new Date(), 'Europe/Copenhagen');
+const cphInDays = (n: number) => civilOf(new Date(Date.now() + n * 86_400_000), 'Europe/Copenhagen');
 const CONTACT = 'Enquiries: Investor Relations, ir@northwind.example, +44 20 7946 0000.';
 const LONG = 'The Board of Northwind Energy plc announces an update for shareholders and the wider market. '.repeat(3);
 
@@ -190,6 +191,50 @@ export const fx = {
       venue: 'XCSE',
       notifiedAt: todayCph(),
     },
+  }),
+  dkHolding: (): CreateInput => ({
+    jurisdiction: 'DK',
+    category: 'major_shareholding',
+    headline: 'Major shareholder announcement',
+    body: `Northwind Energy plc was notified of a change in a major holding.
+${CONTACT}`,
+    metadata: {
+      language: 'da',
+      holder: { name: 'Fjord Capital A/S', type: 'legal_entity' },
+      threshold: '5%',
+      direction: 'up',
+      basis: 'voting_rights',
+      holdingKind: 'shares',
+      holdingPercent: 5.4,
+      crossedOn: todayCph(),
+      notifiedOn: todayCph(),
+    },
+  }),
+  dkBuyback: (): CreateInput => ({
+    jurisdiction: 'DK',
+    category: 'share_buyback',
+    headline: 'Share buyback: transactions',
+    body: `Transactions under the share buyback programme.
+${CONTACT}`,
+    metadata: {
+      language: 'en',
+      programme: 'Share buyback 2026',
+      periodFrom: todayCph(),
+      periodTo: todayCph(),
+      sharesBought: 1000,
+      averagePrice: 118.4,
+      currency: 'DKK',
+      cumulativeShares: 5000,
+      authorisedMaximum: 500000,
+    },
+  }),
+  dkMeeting: (): CreateInput => ({
+    jurisdiction: 'DK',
+    category: 'general_meeting',
+    headline: 'Notice of annual general meeting',
+    body: `The Board convenes the annual general meeting.
+${CONTACT}`,
+    metadata: { language: 'en', meetingType: 'annual', meetingDate: cphInDays(28), venue: 'Copenhagen' },
   }),
   usEarnings: (): CreateInput => ({
     jurisdiction: 'US',

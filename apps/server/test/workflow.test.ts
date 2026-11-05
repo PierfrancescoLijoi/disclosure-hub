@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chaosKey, type Chaos } from '../src/adapters/gateways/mock.js';
+import { chaosKey, MockNasdaqCphGateway, type Chaos } from '../src/adapters/gateways/mock.js';
 import type { CreateInput } from '../src/application/announcements.js';
 import { DomainError } from '../src/domain/errors.js';
 import type { Actor } from '../src/domain/types.js';
+import { makeLei } from '../src/jurisdictions/identifiers.js';
 import { addUser, fx, makeEnv, type Env } from './helpers.js';
 
 let env: Env;
@@ -14,7 +15,7 @@ afterEach(() => env.close());
 const setChaos = (channel: string, chaos: Chaos) =>
   env.rt.store.read.settings.set(chaosKey(channel), JSON.stringify(chaos));
 const receipts = async (channel: string) =>
-  env.rt.db.selectFrom('ext_receipts').selectAll().where('channel', '=', channel).execute();
+  env.rt.db.selectFrom('ext_receipts').selectAll().where('channel', '=', channel).orderBy('seq').execute();
 
 async function expectError(p: Promise<unknown>, status: number, code?: string) {
   const err = await p.then(
@@ -107,6 +108,67 @@ describe('draft to published, Denmark', () => {
     const view = await publishAndSettle(id);
     expect(view.announcement.status).toBe('published');
     expect(await receipts('cph')).toHaveLength(1);
+  });
+
+  it('publishes a major-shareholder announcement, a buyback report and a meeting notice, each with its own type on the receipt', async () => {
+    const { bob } = env.actors;
+    const holding = await publishAndSettle(await toApproved(fx.dkHolding(), [bob]));
+    expect(holding.announcement.status).toBe('published');
+    expect(holding.obligations.join(' ')).toContain('Art. 12(6)');
+    const buyback = await publishAndSettle(await toApproved(fx.dkBuyback(), [env.actors.dan]));
+    expect(buyback.announcement.status).toBe('published');
+    const meeting = await publishAndSettle(await toApproved(fx.dkMeeting(), [bob, env.actors.carol]));
+    expect(meeting.announcement.status).toBe('published');
+    const details = (await receipts('cph')).map((r) => JSON.parse(r.detail));
+    expect(details.map((d) => d.category)).toEqual(['major_shareholding', 'share_buyback', 'general_meeting']);
+    expect(details.every((d) => d.insideInformation === false && d.market === 'main')).toBe(true);
+  });
+
+  it('numbers company announcements per issuer and year, not per channel', async () => {
+    const year = new Date().getUTCFullYear();
+    await env.rt.db
+      .insertInto('ext_receipts')
+      .values({ channel: 'cph', seq: 1, idempotency_key: 'other-issuer:1', external_ref: `7/${year}`, accepted_at: new Date().toISOString(), filing_date: null, detail: JSON.stringify({ cvr: '99999999' }) })
+      .execute();
+    const { bob } = env.actors;
+    const first = await publishAndSettle(await toApproved(fx.dkHolding(), [bob]));
+    const second = await publishAndSettle(await toApproved(fx.dkPdmr(), [bob]));
+    expect(first.publication?.externalRef).toBe(`1/${year}`); // another issuer already has seven; this one starts at one
+    expect(second.publication?.externalRef).toBe(`2/${year}`);
+  });
+
+  it('keeps numbering unique when one issuer releases several announcements at once', async () => {
+    const { bob, erin } = env.actors;
+    const ids = [];
+    for (let i = 0; i < 4; i++) ids.push(await toApproved(fx.dkPdmr(), [bob]));
+    await Promise.all(ids.map((id) => env.svc.publish(erin, id)));
+    await env.settle();
+    const numbers = (await receipts('cph')).map((r) => r.external_ref).sort();
+    expect(new Set(numbers).size).toBe(4);
+    expect(numbers.map((n) => Number(n.split('/')[0])).sort()).toEqual([1, 2, 3, 4]);
+  });
+
+  it('refuses a major-shareholder announcement for a First North issuer before it reaches the wire', async () => {
+    const current = await env.rt.db.selectFrom('issuers').select(['id', 'profiles']).where('name', '=', 'Northwind Energy plc').executeTakeFirstOrThrow();
+    const profiles = JSON.parse(current.profiles);
+    profiles.DK = { ...profiles.DK, market: 'first_north', certifiedAdviser: 'Carnegie A/S' };
+    await env.rt.db.updateTable('issuers').set({ profiles: JSON.stringify(profiles) }).where('id', '=', current.id).execute();
+    const { id } = await env.svc.create(env.actors.alice, fx.dkHolding());
+    const v = await env.svc.validate(env.actors.alice, id);
+    expect(v.ok).toBe(false);
+    expect(v.report.issues.map((i) => i.code)).toContain('DK_REGULATED_MARKET_ONLY');
+  });
+
+  it('rejects at the wire what the exchange would reject: a mismatched inside-information flag or a First North shareholder notice', async () => {
+    const gateway = new MockNasdaqCphGateway(env.rt.db, { now: () => new Date() });
+    const payload = (attributes: Record<string, unknown>) => ({
+      idempotencyKey: `k:${Math.random()}`,
+      payload: { channel: 'cph', headline: 'h', content: 'c', attributes: { cvr: '12345674', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE', market: 'main', language: 'en', category: 'general', insideInformation: 'false', ...attributes }, attachments: [] },
+    });
+    await expect(gateway.submit(payload({ lei: 'bad' }))).rejects.toMatchObject({ kind: 'permanent', code: 'CPH_REJECTED' });
+    await expect(gateway.submit(payload({ market: 'first_north', category: 'major_shareholding' }))).rejects.toMatchObject({ code: 'CPH_REJECTED' });
+    await expect(gateway.submit(payload({ insideInformation: 'true' }))).rejects.toMatchObject({ code: 'CPH_REJECTED' });
+    await expect(gateway.submit(payload({ market: 'nowhere' }))).rejects.toMatchObject({ code: 'CPH_REJECTED' });
   });
 
   it('refuses to publish when the Danish language field is missing', async () => {

@@ -14,7 +14,7 @@ const issuer: Issuer = {
   profiles: {
     UK: { tidm: 'NWE', lei: makeLei('5299000NORTHWINDEN') },
     US: { cik: '0001234567', ccc: 'nw3n3rgy', ticker: 'NWEY', filerStatus: 'domestic' },
-    DK: { cvr: '12345674', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE' },
+    DK: { cvr: '12345674', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE', market: 'main' },
   },
 };
 
@@ -33,10 +33,10 @@ const input = (category: string, metadata: unknown, over: { headline?: string; b
 const codes = (issues: { code: string }[]) => issues.map((i) => i.code);
 const errors = (issues: { code: string; severity: string }[]) => issues.filter((i) => i.severity === 'error').map((i) => i.code);
 
-function context(policy: typeof ukPolicy, category: string, metadata: Record<string, unknown>, now = NOW) {
+function context(policy: typeof ukPolicy, category: string, metadata: Record<string, unknown>, now = NOW, who: Issuer = issuer) {
   const a = { id: 'a1', jurisdiction: policy.code, category } as Announcement;
   const rev = { headline: 'Headline', body: BODY, metadata } as Revision;
-  return ruleContext(policy, a, rev, issuer, now)!;
+  return ruleContext(policy, a, rev, who, now)!;
 }
 
 describe('shared rules', () => {
@@ -316,7 +316,7 @@ describe('Denmark policy (EU MAR, Nasdaq Copenhagen)', () => {
   });
 
   it('checks the issuer has a valid CVR number and LEI', () => {
-    const badCvr: Issuer = { ...issuer, profiles: { DK: { cvr: '12345675', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE' } } };
+    const badCvr: Issuer = { ...issuer, profiles: { DK: { cvr: '12345675', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE', market: 'main' } } };
     expect(codes(dkPolicy.validate(input('general', { language: 'en' }, { issuer: badCvr })))).toContain('ISSUER_PROFILE_INCOMPLETE');
   });
 
@@ -370,5 +370,174 @@ describe('Denmark policy (EU MAR, Nasdaq Copenhagen)', () => {
     expect(closed.window.nextOpenAt?.toISOString()).toBe('2026-11-03T06:00:00.000Z');
     const inside = dkPolicy.timing(context(dkPolicy, 'inside_information', { language: 'en', informationBecameKnownAt: '2026-11-03T03:00:00Z', personResponsible: person }, new Date('2026-11-03T04:30:00Z')));
     expect(inside.holdWhenClosed).toBe(false);
+  });
+});
+
+describe('Denmark: market segment, major shareholders, buy-backs and general meetings', () => {
+  const dk = (over: Record<string, string> = {}): Issuer => ({ ...issuer, profiles: { ...issuer.profiles, DK: { ...issuer.profiles.DK!, ...over } } });
+  const firstNorth = dk({ market: 'first_north', certifiedAdviser: 'Carnegie A/S' });
+
+  const holding = (over: Record<string, unknown> = {}) => ({
+    language: 'en',
+    holder: { name: 'Fjord Capital A/S', type: 'legal_entity' },
+    threshold: '5%',
+    direction: 'up',
+    basis: 'voting_rights',
+    holdingKind: 'shares',
+    holdingPercent: 5.4,
+    crossedOn: '2026-11-02',
+    notifiedOn: '2026-11-03',
+    ...over,
+  });
+  const buyback = (over: Record<string, unknown> = {}) => ({
+    language: 'en',
+    programme: 'Share buyback 2026',
+    periodFrom: '2026-10-30',
+    periodTo: '2026-11-02',
+    sharesBought: 12000,
+    averagePrice: 118.4,
+    currency: 'DKK',
+    cumulativeShares: 96000,
+    authorisedMaximum: 500000,
+    ...over,
+  });
+  const meeting = (over: Record<string, unknown> = {}) => ({ language: 'en', meetingType: 'annual', meetingDate: '2026-12-01', venue: 'Copenhagen', ...over });
+
+  describe('market segment', () => {
+    it('needs the issuer profile to say whether it is on the main market or First North', () => {
+      const noMarket = dk();
+      delete (noMarket.profiles.DK as Record<string, string>).market;
+      const issues = dkPolicy.validate(input('general', { language: 'en' }, { issuer: noMarket }));
+      expect(issues.map((i) => [i.code, i.path])).toEqual([['ISSUER_PROFILE_INCOMPLETE', 'issuer.market']]);
+    });
+
+    it('asks a First North issuer for its Certified Adviser', () => {
+      const issues = dkPolicy.validate(input('general', { language: 'en' }, { issuer: dk({ market: 'first_north' }) }));
+      expect(issues.map((i) => [i.code, i.path])).toEqual([['ISSUER_PROFILE_INCOMPLETE', 'issuer.certifiedAdviser']]);
+      expect(dkPolicy.validate(input('general', { language: 'en' }, { issuer: firstNorth }))).toEqual([]);
+    });
+
+    it('keeps the MAR duties on First North but stops the regulated-market notifications', () => {
+      const known = new Date(NOW.getTime() - 90 * 60_000).toISOString();
+      const inside = { language: 'en', informationBecameKnownAt: known, personResponsible: { name: 'Bob Chen', title: 'Company Secretary' } };
+      expect(dkPolicy.validate(input('inside_information', inside, { issuer: firstNorth })).map((i) => i.code)).toEqual(['EU_MAR_ASAP']);
+      expect(errors(dkPolicy.validate(input('major_shareholding', holding(), { issuer: firstNorth })))).toEqual(['DK_REGULATED_MARKET_ONLY']);
+    });
+
+    it('adds the Certified Adviser to the post-publication duties on First North only', () => {
+      const note = (who: Issuer) => dkPolicy.postPublication(context(dkPolicy, 'general', { language: 'en' }, NOW, who)).join(' ');
+      expect(note(firstNorth)).toContain('Certified Adviser');
+      expect(note(issuer)).not.toContain('Certified Adviser');
+    });
+  });
+
+  describe('major shareholder announcement (Transparency Directive Art. 9)', () => {
+    it('accepts a consistent crossing and dates', () => {
+      expect(dkPolicy.validate(input('major_shareholding', holding()))).toEqual([]);
+    });
+
+    it('rejects a holding that contradicts the threshold and direction', () => {
+      expect(errors(dkPolicy.validate(input('major_shareholding', holding({ holdingPercent: 4.6 }))))).toEqual(['DK_TD_HOLDING_VS_THRESHOLD']);
+      expect(errors(dkPolicy.validate(input('major_shareholding', holding({ direction: 'down', holdingPercent: 5.2 }))))).toEqual(['DK_TD_HOLDING_VS_THRESHOLD']);
+      expect(dkPolicy.validate(input('major_shareholding', holding({ direction: 'down', holdingPercent: 4.8 })))).toEqual([]);
+    });
+
+    it('rejects dates in the future or in the wrong order', () => {
+      expect(errors(dkPolicy.validate(input('major_shareholding', holding({ crossedOn: '2026-11-04', notifiedOn: '2026-11-04' }))))).toEqual(['DK_TD_DATE_IN_FUTURE', 'DK_TD_DATE_IN_FUTURE']);
+      expect(errors(dkPolicy.validate(input('major_shareholding', holding({ crossedOn: '2026-11-03', notifiedOn: '2026-11-02' }))))).toEqual(['DK_TD_DATES']);
+    });
+
+    it('warns when the shareholder told the issuer after four trading days', () => {
+      const late = dkPolicy.validate(input('major_shareholding', holding({ crossedOn: '2026-10-26', notifiedOn: '2026-11-03' })));
+      expect(late.map((i) => [i.code, i.severity])).toEqual([['DK_TD_LATE_HOLDER_NOTIFICATION', 'warning']]);
+      expect(dkPolicy.validate(input('major_shareholding', holding({ crossedOn: '2026-10-30', notifiedOn: '2026-11-03' })))).toEqual([]);
+    });
+
+    it('gives the issuer three trading days from the notification', () => {
+      const t = dkPolicy.timing(context(dkPolicy, 'major_shareholding', holding({ crossedOn: '2026-10-30', notifiedOn: '2026-11-02' })));
+      expect(t.deadline?.at?.toISOString()).toBe('2026-11-05T22:59:00.000Z'); // Thu 5 Nov, 23:59 in Copenhagen
+      expect(t.deadline?.basis).toContain('Art. 12(6)');
+    });
+
+    it('renders the crossing in Danish or English and asks for the filing with Finanstilsynet', () => {
+      const da = dkPolicy.render(context(dkPolicy, 'major_shareholding', holding({ language: 'da' })));
+      expect(da.content).toContain('Større aktionærmeddelelse');
+      expect(da.content).toContain('overskredet grænsen på 5 % af stemmerettighederne');
+      expect(da.attributes).toMatchObject({ category: 'major_shareholding', market: 'main', insideInformation: 'false' });
+      const en = dkPolicy.render(context(dkPolicy, 'major_shareholding', holding()));
+      expect(en.content).toContain('Crossed above the 5% threshold of voting rights');
+      expect(dkPolicy.postPublication(context(dkPolicy, 'major_shareholding', holding())).join(' ')).toContain('Art. 12(6)');
+    });
+
+    it('asks for the company secretary alone', () => {
+      expect(dkPolicy.approvalRequirement(context(dkPolicy, 'major_shareholding', holding()))).toEqual({ min: 1, mustInclude: ['company_secretary'] });
+    });
+  });
+
+  describe('share buyback report (EU MAR Art. 5)', () => {
+    it('accepts a coherent report', () => {
+      expect(dkPolicy.validate(input('share_buyback', buyback()))).toEqual([]);
+    });
+
+    it('rejects a total below the period, a total above the authorisation and an impossible period', () => {
+      expect(errors(dkPolicy.validate(input('share_buyback', buyback({ cumulativeShares: 5000 }))))).toEqual(['DK_BUYBACK_CUMULATIVE']);
+      expect(errors(dkPolicy.validate(input('share_buyback', buyback({ cumulativeShares: 600000 }))))).toEqual(['DK_BUYBACK_ABOVE_AUTHORISATION']);
+      expect(errors(dkPolicy.validate(input('share_buyback', buyback({ periodFrom: '2026-11-02', periodTo: '2026-10-30' }))))).toEqual(['DK_BUYBACK_PERIOD']);
+      expect(errors(dkPolicy.validate(input('share_buyback', buyback({ periodTo: '2026-11-09' }))))).toEqual(['DK_BUYBACK_PERIOD']);
+    });
+
+    it('counts seven market sessions from the first transaction in the report, so a longer period is due sooner', () => {
+      const long = dkPolicy.timing(context(dkPolicy, 'share_buyback', buyback()));
+      expect(long.deadline?.at?.toISOString()).toBe('2026-11-10T22:59:00.000Z'); // Fri 30 Oct + 7 sessions = Tue 10 Nov
+      const week = dkPolicy.timing(context(dkPolicy, 'share_buyback', buyback({ periodFrom: '2026-11-02' })));
+      expect(week.deadline?.at?.toISOString()).toBe('2026-11-11T22:59:00.000Z');
+    });
+
+    it('skips Danish closing days when it counts the sessions', () => {
+      const t = dkPolicy.timing(context(dkPolicy, 'share_buyback', buyback({ periodFrom: '2026-05-11', periodTo: '2026-05-12' }), new Date('2026-05-13T10:00:00Z')));
+      expect(t.deadline?.at?.toISOString()).toBe('2026-05-21T21:59:00.000Z'); // 12, 13, 15 (14 May is closed), 18, 19, 20, 21
+    });
+
+    it('renders the figures in the language of the announcement and asks for the transaction report', () => {
+      const da = dkPolicy.render(context(dkPolicy, 'share_buyback', buyback({ language: 'da' })));
+      expect(da.content).toContain('Aktietilbagekøbsprogram: Share buyback 2026');
+      expect(da.content).toContain('I alt under programmet: 96000 af højst 500000 aktier');
+      expect(dkPolicy.postPublication(context(dkPolicy, 'share_buyback', buyback())).join(' ')).toContain('Art. 5(3)');
+      expect(dkPolicy.approvalRequirement(context(dkPolicy, 'share_buyback', buyback()))).toEqual({ min: 1, mustInclude: ['cfo'] });
+    });
+  });
+
+  describe('notice of general meeting (Companies Act)', () => {
+    it('accepts a notice 21 days to 5 weeks ahead', () => {
+      expect(dkPolicy.validate(input('general_meeting', meeting({ meetingDate: '2026-11-24' })))).toEqual([]);
+      expect(dkPolicy.validate(input('general_meeting', meeting({ meetingDate: '2026-12-08' })))).toEqual([]);
+    });
+
+    it('blocks a notice that is too short for the type of meeting', () => {
+      expect(errors(dkPolicy.validate(input('general_meeting', meeting({ meetingDate: '2026-11-23' }))))).toEqual(['DK_MEETING_NOTICE_TOO_SHORT']);
+      expect(dkPolicy.validate(input('general_meeting', meeting({ meetingType: 'extraordinary', meetingDate: '2026-11-17' })))).toEqual([]);
+      expect(errors(dkPolicy.validate(input('general_meeting', meeting({ meetingType: 'extraordinary', meetingDate: '2026-11-16' }))))).toEqual(['DK_MEETING_NOTICE_TOO_SHORT']);
+    });
+
+    it('warns, without blocking, when the notice is sent more than five weeks ahead, and rejects a past meeting', () => {
+      const early = dkPolicy.validate(input('general_meeting', meeting({ meetingDate: '2026-12-15' })));
+      expect(early.map((i) => [i.code, i.severity])).toEqual([['DK_MEETING_NOTICE_TOO_EARLY', 'warning']]);
+      expect(early[0]!.message).toContain('2026-11-10');
+      expect(errors(dkPolicy.validate(input('general_meeting', meeting({ meetingDate: '2026-11-03' }))))).toEqual(['DK_MEETING_IN_PAST']);
+    });
+
+    it('works backwards from the meeting: the deadline is the last day the notice can go out', () => {
+      const annual = dkPolicy.timing(context(dkPolicy, 'general_meeting', meeting({ meetingDate: '2026-12-15' })));
+      expect(annual.deadline?.at?.toISOString()).toBe('2026-11-24T22:59:00.000Z');
+      const extra = dkPolicy.timing(context(dkPolicy, 'general_meeting', meeting({ meetingType: 'extraordinary', meetingDate: '2026-12-15' })));
+      expect(extra.deadline?.at?.toISOString()).toBe('2026-12-01T22:59:00.000Z');
+    });
+
+    it('renders the notice and needs two approvers including the company secretary', () => {
+      const da = dkPolicy.render(context(dkPolicy, 'general_meeting', meeting({ language: 'da' })));
+      expect(da.content).toContain('Indkaldelse til ordinær generalforsamling');
+      expect(da.content).toContain('Sted: Copenhagen');
+      expect(dkPolicy.approvalRequirement(context(dkPolicy, 'general_meeting', meeting()))).toEqual({ min: 2, mustInclude: ['company_secretary'] });
+    });
   });
 });
