@@ -55,7 +55,7 @@ What the three jurisdictions actually differ on, as modelled:
 |---|---|---|---|
 | Timing | MAR Art. 17: as soon as possible (a delay needs a recorded reason); PDMR: 3 business days from the transaction (Art. 19(3)); DTR 4 results deadlines | 8-K: 4 business days from the event; Item 1.05 from the materiality determination; Items 7.01 and 8.01 are voluntary, no deadline; Reg FD: later of 24 h or the next NYSE open after the official learned of it; 6-K: promptly, no fixed instant | the same MAR and reporting rules, counted on the Danish calendar |
 | Window | RNS hours; inside information is never held for them | EDGAR 06:00 to 22:00 ET; after 17:30 ET the filing date is the next business day | 07:00 to 22:00 Copenhagen; inside information is never held |
-| Extra | PDMR / results categories | Filer status in the issuer profile (8-K for domestic filers, 6-K for foreign private issuers); Exhibit 99.1 required for item 2.02; Reg FD flag for item 7.01 | Language (Danish or English) required on every announcement; a notification threshold for managers' transactions; the regulator notice only when disclosure was delayed |
+| Extra | PDMR / results categories | Filer status in the issuer profile (8-K for domestic filers, 6-K for foreign private issuers); Exhibit 99.1 required for item 2.02; Reg FD flag for item 7.01 | Market segment in the issuer profile (main market, or First North with a Certified Adviser; shareholder notifications only on the main market); language (Danish or English) required on every announcement; three categories the others lack (major shareholder announcements, share buyback reports, notices of general meetings); a notification threshold for managers' transactions; announcement numbers per issuer and year |
 | Identifiers | TIDM, LEI | CIK, CCC, ticker | CVR number, LEI, ticker |
 | Acknowledgement | RNS number | accession number + filing date | company announcement number |
 
@@ -89,7 +89,7 @@ the production queue, an in-process queue (with delays and bounded concurrency) 
 
 ### 2.5 AI is advisory and optional
 
-A pre-check suggests classification, missing information and UK MAR / US Reg FD risks, with the
+A pre-check suggests classification, missing information and UK MAR / EU MAR (Denmark) / US Reg FD risks, with the
 quoted evidence for each. It is a separate table and a separate port, so it cannot affect a status.
 
 - Output is validated with Zod and against the policy's category vocabulary; malformed or out-of-vocabulary output is discarded.
@@ -194,7 +194,7 @@ Verified by running it:
 
 - Draft to published in UK, US and Denmark through the UI, the REST demo and the tests.
 - Retry with backoff, exhaustion and manual retry, permanent rejection, lost acknowledgement (reconciled), lease takeover after a crash, lost wake-up recovery by the sweeper.
-- Same suite on SQLite (188 passing, 7 integration tests skipped) and, before Denmark was added, on PostgreSQL + Redis (183 tests, including two workers; not repeated since), plus 12 UI logic tests. The screens are described in docs/UI.md.
+- Same suite on SQLite (217 passing, 7 integration tests skipped) and on PostgreSQL 16 + Redis 7 (all 224 passing, including the two-worker tests and Denmark's concurrent numbering test), plus 12 UI logic tests. The screens are described in docs/UI.md.
 - Real authentication: tokens verified against a JWKS (valid, expired, wrong audience or issuer, forged, unknown role, provider down), and sign-in with Authorization Code + PKCE through a real browser against Keycloak.
 - The PostgreSQL queue on a real database, with two workers and after the listener connection is cut.
 - The Compose twin (Keycloak, PostgreSQL queue, migrate job, 2 workers) with the demo and a benchmark using real tokens.

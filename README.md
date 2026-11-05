@@ -7,7 +7,8 @@ jurisdictions (UK, US and Denmark), with one shared workflow and per-jurisdictio
 |---|---|---|---|
 | Regime | UK MAR, Listing Rules, DTR | Exchange Act, Form 8-K, Reg FD | EU MAR, Transparency Directive |
 | Channel | RNS (mock) | SEC EDGAR (mock) | Nasdaq Copenhagen (mock) |
-| Categories | inside information, PDMR dealing, results, general | Form 8-K (items 1.01, 2.02, 5.02, 7.01, 8.01) | the UK's four, plus a required language (Danish or English) |
+| Categories | inside information, PDMR dealing, results, general | Form 8-K (items 1.01, 1.05, 2.02, 5.02, 5.07, 7.01, 8.01), Form 6-K | the UK's four, plus major shareholder announcements, share buyback reports and notices of general meetings; every one in Danish or English |
+| Issuer status | none | domestic filer (8-K) or foreign private issuer (6-K) | main market or First North (with a Certified Adviser) |
 | Acknowledgement | RNS number, e.g. `0001B` | accession number, e.g. `0001234567-26-000001` | company announcement number, e.g. `1/2026` |
 
 > **The rules are simplified models, not legal advice.** They show how jurisdiction logic is
@@ -250,7 +251,7 @@ and run `AUTH=oidc GATEWAY_LATENCY_MS=200 N=200 CONCURRENCY=5 npm run bench`. Re
 ## Tests
 
 ```bash
-npm test               # 188 server tests pass; 7 integration tests need PostgreSQL or Redis and are skipped
+npm test               # 217 server tests pass; 7 integration tests need PostgreSQL or Redis and are skipped
 npm test -w apps/web   # 12 UI logic tests (diff, attention queue, readiness)
 npm run typecheck
 ```
@@ -263,7 +264,7 @@ docker run -d --name hub-test-redis -p 56379:6379 redis:7-alpine
 
 TEST_PG_URL=postgres://hub:hub-dev-only@localhost:55432/hub_test \
 TEST_REDIS_URL=redis://localhost:56379 \
-npm test -w apps/server -- --no-file-parallelism     # all 195 server tests (last run on PostgreSQL + Redis at 183, before Denmark was added)
+npm test -w apps/server -- --no-file-parallelism     # all 224 server tests, none skipped (passed on PostgreSQL 16 + Redis 7 on 5 Nov, Denmark included)
 ```
 
 With `TEST_PG_URL` every integration test runs on PostgreSQL (the schema is dropped and recreated per
@@ -274,7 +275,7 @@ are missing.
 What the tests cover:
 
 - `domain`: state machine, permissions, content hash, audit chain tamper detection, business-day calendar and time-zone windows.
-- `policies`: UK, US and Denmark validation, deadlines, approval requirements, rendering, identifier checks (LEI, ISIN, CVR).
+- `policies`: UK, US and Denmark validation, deadlines, approval requirements, rendering, identifier checks (LEI, ISIN, CVR); for Denmark also the market segment, major shareholder, buyback and general-meeting rules.
 - `workflow`: the full draft to published path in all three jurisdictions, revisions and voided approvals, retry, lost acknowledgement, lease takeover, lost wake-up recovery, idempotent publish, permanent rejection.
 - `hardening`: approvals bound to the reviewed revision, a hanging gateway times out and fails visibly, rate limits per actor, metrics output, the sweeper indexes, concurrent idempotent create.
 - `operations`: publication windows, Denmark as the only registered jurisdiction running through the unchanged workflow, AI pre-check safety, an architecture test that fails the build on forbidden imports.
@@ -327,7 +328,7 @@ No secrets are stored in the repository.
 
 ## AI pre-check
 
-An advisory regulatory pre-check (classification, missing information, UK MAR and US Reg FD risks,
+An advisory regulatory pre-check (classification, missing information, UK MAR, EU MAR (Denmark) and US Reg FD risks,
 structured and explainable). It **never approves, blocks, or publishes**. The platform works the
 same with `AI_PROVIDER=off`.
 

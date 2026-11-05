@@ -131,7 +131,7 @@ None of these blocks the system; each has a default so the work could proceed.
 
 | # | To define | Default assumed | Decides | Where |
 |---|---|---|---|---|
-| 1 | Which jurisdiction is third (EU, Nasdaq Copenhagen, ASX) | None built | Which policy primitives to generalise first (national storage mechanisms, language rules) | questions.md #1, L-15 |
+| 1 | Which jurisdiction is third (EU, Nasdaq Copenhagen, ASX) | Denmark built (assumed) | Which policy primitives to generalise first (national storage mechanisms, language rules) | questions.md #1, L-15 |
 | 2 | Integrate with each newswire directly, or sit in front of a vendor the customer already pays | Direct, behind a gateway port | Gateway ownership, cost, SLA | questions.md #2 |
 | 3 | Who signs off disclosure today, and does it differ per customer | Approval requirement per category | Whether approval rules must be configurable per tenant (policies are code today) | questions.md #3 |
 | 4 | Is scheduled release at an exact time (07:00 UK results) a launch requirement | Cut | A time-critical path and an embargo state | questions.md #4 |
