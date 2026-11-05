@@ -170,6 +170,7 @@ Editable draw.io sources with PNG exports, in `docs/diagrams/`:
 - [`01-use-cases`](docs/diagrams/01-use-cases.drawio.png): the four roles and what each does.
 - [`02-azure-architecture`](docs/diagrams/02-azure-architecture.drawio.png): the Azure design with its resources (validated offline, not applied).
 - [`03-local-architecture`](docs/diagrams/03-local-architecture.drawio.png): the Compose twin and how one filing flows through it.
+- [`04-local-scaling`](docs/diagrams/04-local-scaling.drawio.png): how each container scales on one machine, how far, what was run and what was only designed, and the four commands to show it.
 
 ## One architecture, three ways to run it
 

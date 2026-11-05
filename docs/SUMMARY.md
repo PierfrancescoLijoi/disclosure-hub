@@ -26,7 +26,7 @@ A **modular monolith with hexagonal boundaries** in TypeScript. One codebase and
 ```
 
 Diagrams: [use cases](diagrams/01-use-cases.drawio.png), [Azure](diagrams/02-azure-architecture.drawio.png),
-[local](diagrams/03-local-architecture.drawio.png).
+[local](diagrams/03-local-architecture.drawio.png), [local scaling](diagrams/04-local-scaling.drawio.png).
 
 ## What is shared and what differs (UK, US, Denmark)
 
