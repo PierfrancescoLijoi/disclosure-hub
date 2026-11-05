@@ -105,7 +105,7 @@ different reasons and are owned by different people.
 | | Regulatory difference | Operational difference |
 |---|---|---|
 | Question it answers | What must be said, by when, approved by whom? | How is it delivered, and what comes back? |
-| Where it lives | A **policy**: `jurisdictions/uk.ts` (97 lines), `us.ts` (248), `dk.ts` (143), with the shared MAR text in `mar.ts` (122) | A **gateway adapter** implementing `PublishGateway` (`find`, `submit`): `adapters/gateways/mock.ts` today |
+| Where it lives | A **policy**: `jurisdictions/uk.ts` (97 lines), `us.ts` (248), `dk.ts` (383), with the shared MAR text in `mar.ts` (122) | A **gateway adapter** implementing `PublishGateway` (`find`, `submit`): `adapters/gateways/mock.ts` today |
 | Contract | `JurisdictionPolicy` in `domain/policy.ts`, built with `definePolicy({...})` | `PublishGateway`, `PublishAck`, `GatewayError` (`transient` or `permanent`) in `ports/index.ts` |
 | Reviewed by | Compliance / legal (one file per regime, rule sources named in comments) | Engineering / vendor management |
 

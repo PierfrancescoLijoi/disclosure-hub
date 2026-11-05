@@ -28,6 +28,24 @@ A **modular monolith with hexagonal boundaries** in TypeScript. One codebase and
 Diagrams: [use cases](diagrams/01-use-cases.drawio.png), [Azure](diagrams/02-azure-architecture.drawio.png),
 [local](diagrams/03-local-architecture.drawio.png).
 
+## What is shared and what differs (UK, US, Denmark)
+
+| Layer | Written once, used by all three | Shared by UK and Denmark only | Written per jurisdiction |
+|---|---|---|---|
+| Workflow | State machine, revisions and hash, maker-checker, approval binding, audit chain, tenant isolation | | Nothing |
+| Validation | Common checks in `definePolicy` (headline, empty body, placeholders, issuer profile, schema, deadline passed); business-day maths in `domain/calendar.ts`; identifier checks in `jurisdictions/identifiers.ts` | MAR rules and deadlines for inside information, managers' transactions and results (`mar.ts`, 122 lines), each policy supplying its own calendar, time zone and code prefix (`UK_MAR_*`, `EU_MAR_*`) | **Policy file:** `uk.ts` (97 lines), `us.ts` (248), `dk.ts` (383): categories and their fields, specific rules, deadlines, approvals, window, rendering, issuer profile |
+| Publishing | Runner (lease, retry, idempotency key, sweeper), the `PublishGateway` contract, the mock gateway base class (lookup by key, replay safety, failure modes) | | **Gateway subclass:** what the channel accepts and rejects, and its receipt (RNS number, EDGAR accession number, `n/year`) |
+| After publishing | Outbox, public archive, subscriptions, agents | | Post-publication obligations (in the policy) |
+| API and UI | Whole REST API and whole UI; forms are generated from each category's schema | | Nothing (menus and forms read the registered policies); sample text for the example button |
+| Data | One migration, no jurisdiction column constraint | | Holiday calendar (`jurisdictions/calendars.ts`) and seed data for the issuer's identifiers |
+
+How they differ in substance (categories, deadlines, approvals, windows, identifiers, receipts) is tabulated in the
+[README](../README.md) and, with where each difference lives, in [BRIEF-RESPONSE §2](BRIEF-RESPONSE.md#2-regulatory-and-operational-differences-two-kinds-two-homes).
+The US does not share `mar.ts` because Form 8-K and Reg FD are a different regime, not another copy of MAR.
+
+Adding a jurisdiction means writing only the right-hand column: one policy file, one gateway subclass, two registrations
+([MODULES.md](MODULES.md#add-a-jurisdiction)).
+
 ## Key decisions
 
 | Decision | Why |
