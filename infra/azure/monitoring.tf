@@ -254,6 +254,40 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "publication_failed" {
   }
 }
 
+# Publishing backlog: the worker logs the age of the oldest due publication every minute (the same number as /metrics).
+# This is the signal CPU cannot give: a worker waiting on a slow vendor is idle, yet the queue grows.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "publication_backlog" {
+  name                 = "${local.name}-publication-backlog"
+  resource_group_name  = azurerm_resource_group.main.name
+  location             = azurerm_resource_group.main.location
+  scopes               = [azurerm_log_analytics_workspace.main.id]
+  description          = "A publication has been due for more than 2 minutes and no worker took it: workers are down or saturated, or a newswire is slow. Raise worker_replicas.min (at most 6) or read the gateway errors."
+  severity             = 1
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT10M"
+  tags                 = local.tags
+
+  criteria {
+    query                   = <<-KQL
+      ContainerAppConsoleLogs_CL
+      | extend j = parse_json(Log_s)
+      | where tostring(j.msg) == "publication-queue" and toint(j.oldestWaitingSeconds) > 120
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+}
+
 # ------------------------------------------------------------------ events and readers
 
 # One alert per consumer set: a set with no replica means its events pile up (readers hear nothing, agents stay silent).

@@ -712,6 +712,19 @@ run "the_database_has_an_early_warning_before_it_is_the_bottleneck" {
   }
 }
 
+run "a_publishing_backlog_raises_an_alert_because_cpu_cannot_see_it" {
+  command = apply
+
+  assert {
+    condition     = strcontains(azurerm_monitor_scheduled_query_rules_alert_v2.publication_backlog.criteria[0].query, "publication-queue") && strcontains(azurerm_monitor_scheduled_query_rules_alert_v2.publication_backlog.criteria[0].query, "> 120")
+    error_message = "The worker logs the age of the oldest due publication; the alert fires past 120 s."
+  }
+  assert {
+    condition     = azurerm_monitor_scheduled_query_rules_alert_v2.publication_backlog.severity == 1 && length(azurerm_monitor_scheduled_query_rules_alert_v2.publication_backlog.action[0].action_groups) == 1
+    error_message = "A backlog of publications is as serious as a failed one and goes to the ops action group."
+  }
+}
+
 # ------------------------------------------------------------------ bad input is refused
 
 run "rejects_unknown_environment" {

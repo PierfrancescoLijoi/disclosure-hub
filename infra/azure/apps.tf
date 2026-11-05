@@ -230,8 +230,13 @@ resource "azurerm_container_app" "worker" {
     min_replicas = var.worker_replicas.min
     max_replicas = var.worker_replicas.max
 
-    # No ingress, so no request count to scale on. Publication work is short and the lease makes any
-    # number of workers safe; CPU is a sufficient signal at this size.
+    # No ingress, so no request count to scale on. The lease makes any number of workers safe, but CPU does NOT see a
+    # publishing backlog: a worker waiting on a slow vendor is idle. So this rule is only a safety net and the real
+    # capacity is the floor (2 workers, about 15 publications/s measured, against a peak of 0.17/s). The backlog is
+    # watched by the publication_backlog alert (monitoring.tf), and the person who gets it raises worker_replicas.min.
+    # A backlog-driven scaler needs a signal KEDA can read without a credential: the database is Entra-only (no
+    # password for a postgresql scaler) and /metrics sits behind the edge check. The backlog scaler arrives with
+    # Service Bus (KEDA azure-servicebus, managed identity), at the triggers in docs/adr/0001.
     custom_scale_rule {
       name             = "cpu"
       custom_rule_type = "cpu"
