@@ -119,6 +119,7 @@ Start with the first two; the rest is reference.
 | [docs/adr/0001-database-bottleneck-and-service-bus.md](docs/adr/0001-database-bottleneck-and-service-bus.md) | When the single database stops being enough, and the triggers |
 | [docs/DR.md](docs/DR.md) | Losing a region: what exists, numbers, how to fail over |
 | [docs/UI.md](docs/UI.md) | Screens, routes, deviations from the product spec |
+| [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md) | Plain-language walkthrough of the whole project: flow, reliability, jurisdictions, Azure, trade-offs, likely questions |
 | [infra/azure/README.md](infra/azure/README.md) | The Azure design, what is verified offline, what the first deploy must prove, cost |
 | [infra/azure-landing-zone](infra/azure-landing-zone/README.md) | Governance base: management groups, policy, RBAC |
 | [discovery/spec.md](discovery/spec.md) | Problem, goals, stories, requirements (EARS), business rules, known limits of the regulatory model |
