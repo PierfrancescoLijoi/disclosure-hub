@@ -4,7 +4,7 @@
 #
 #   bootstrap.cmd              double-click it, or run it from a terminal
 #   bootstrap.cmd -NoStart     prepare everything, do not start
-#   bootstrap.cmd -Demo        with the app running in another window: publish one UK and one US announcement through the API
+#   bootstrap.cmd -Demo        with the app running in another window: publish one announcement in each jurisdiction (UK, US, Denmark) through the API
 param([switch]$NoStart, [switch]$Demo)
 
 $ErrorActionPreference = 'Stop'

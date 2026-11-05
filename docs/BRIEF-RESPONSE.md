@@ -11,10 +11,10 @@ Map of all the other documents: [README, "Documentation map"](../README.md#docum
 
 | The brief | Short answer | Section |
 |---|---|---|
-| A working system: draft to published, in each of at least two jurisdictions | UK (RNS, UK MAR) and US (EDGAR, Form 8-K, Reg FD), one workflow, mock newswires | [0](#0-a-working-system) |
+| A working system: draft to published, in each of at least two jurisdictions | Three: UK (RNS, UK MAR), US (EDGAR, Form 8-K, Reg FD) and Denmark (Nasdaq Copenhagen, EU MAR), one workflow, mock newswires | [0](#0-a-working-system) |
 | "A system built for scale, both in the code you write and in the architecture behind it" | Enforced module boundaries and stateless processes in the code; a queue that is only a hint, an outbox for everything that follows, roles that split into separate processes in the architecture; measured | [1](#1-built-for-scale-in-the-code-and-in-the-architecture) |
 | "A clear way of handling the regulatory and operational differences between your chosen jurisdictions" | Two kinds of difference, two homes: regulatory rules in a **policy**, operational delivery in a **gateway adapter** | [2](#2-regulatory-and-operational-differences-two-kinds-two-homes) |
-| "Good choices about how to handle those differences without duplicating effort, so the system can be extended to more jurisdictions later" | The workflow exists once. A jurisdiction is a policy value plus a gateway; the UI, the archive and the follow form read it. A test adds a made-up country without touching the workflow | [3](#3-without-duplicating-effort-extending-to-more-jurisdictions) |
+| "Good choices about how to handle those differences without duplicating effort, so the system can be extended to more jurisdictions later" | The workflow exists once. A jurisdiction is a policy value plus a gateway; the UI, the archive and the follow form read it. Denmark was added that way (one policy, one gateway, two registrations) without touching the workflow | [3](#3-without-duplicating-effort-extending-to-more-jurisdictions) |
 
 ## 0. A working system
 
@@ -28,7 +28,7 @@ npm start          # http://localhost:3000, seeded personas, SQLite, one process
 or `docker compose up --build` for the production-shaped twin (PostgreSQL, Keycloak sign-in, separate api, worker,
 notifier and agents processes).
 
-**Take an announcement from draft to published** (the same eight steps in both jurisdictions):
+**Take an announcement from draft to published** (the same eight steps in all three jurisdictions):
 
 1. `alice` (author): *New announcement*, pick the jurisdiction and category, *Fill with example content*, save.
 2. **Validate**: errors and warnings with codes and field paths (the rules of that jurisdiction).
@@ -46,8 +46,8 @@ Without a browser: `npm run demo` drives one announcement per jurisdiction throu
 the mail service locally, and the AI provider by default. Sign-in is real OIDC in the container setup and in the Azure
 design. Nothing is submitted to a regulator.
 
-**Evidence that it works:** 176 server tests pass on SQLite and 183 on PostgreSQL + Redis (7 need those services and are
-skipped otherwise), 12 UI logic tests. The workflow tests run the full path in both jurisdictions; the container stack was
+**Evidence that it works:** 188 server tests pass on SQLite (7 more need PostgreSQL or Redis and are skipped there; the PostgreSQL + Redis run was last
+done at 183 tests, before Denmark was added, and not repeated), 12 UI logic tests. The workflow tests run the full path in all three jurisdictions; the container stack was
 run end to end with the demo and a benchmark. See [ARCHITECTURE.md §6](ARCHITECTURE.md#6-verified-and-only-designed).
 
 ## 1. Built for scale, in the code and in the architecture
@@ -90,8 +90,12 @@ Full model, assumptions and what would change them: [SIZING.md](SIZING.md). Meth
 - Not measured: more than 3 workers, a remote database, sustained load over hours, Redis or PostgreSQL failure under load.
 - The first limits I expect are the database connection pool and the archive text search (a scan). Both have a trigger
   and a next step in the ADR.
-- The real ceiling is the outside world: RNS and EDGAR throttle submissions. The platform caps concurrency per gateway so a
-  burst cannot exceed a vendor's limit.
+- The real ceiling is the outside world: RNS, EDGAR and Nasdaq Copenhagen throttle submissions. The platform caps concurrency per gateway *per
+  worker process* (default 2), so the vendor sees at most workers x 2 calls (12 at the 6-worker ceiling). That is a knob to
+  set against the vendor's limit, not a guarantee: a global cap needs shared state and is a next step.
+- The Azure worker autoscale rule is CPU, which does not see a publishing backlog (a worker waiting on a vendor is idle).
+  Capacity is the floor of 2 workers (about 15 a second against a 0.17 peak); the backlog is watched by an alert on the age
+  of the oldest due publication. A backlog scaler comes with Service Bus.
 
 ## 2. Regulatory and operational differences: two kinds, two homes
 
@@ -101,26 +105,32 @@ different reasons and are owned by different people.
 | | Regulatory difference | Operational difference |
 |---|---|---|
 | Question it answers | What must be said, by when, approved by whom? | How is it delivered, and what comes back? |
-| Where it lives | A **policy**: `jurisdictions/uk.ts` (185 lines), `jurisdictions/us.ts` (248 lines) | A **gateway adapter** implementing `PublishGateway` (`find`, `submit`): `adapters/gateways/mock.ts` today |
+| Where it lives | A **policy**: `jurisdictions/uk.ts` (97 lines), `us.ts` (248), `dk.ts` (143), with the shared MAR text in `mar.ts` (122) | A **gateway adapter** implementing `PublishGateway` (`find`, `submit`): `adapters/gateways/mock.ts` today |
 | Contract | `JurisdictionPolicy` in `domain/policy.ts`, built with `definePolicy({...})` | `PublishGateway`, `PublishAck`, `GatewayError` (`transient` or `permanent`) in `ports/index.ts` |
 | Reviewed by | Compliance / legal (one file per regime, rule sources named in comments) | Engineering / vendor management |
 
-What differs between the two jurisdictions as modelled, and where each difference sits:
+What differs between the three jurisdictions as modelled, and where each difference sits:
 
-| | UK | US | Lives in |
-|---|---|---|---|
-| Regime and channel | UK MAR, Listing Rules, DTR; RNS | Exchange Act, Form 8-K, Reg FD; EDGAR | policy `code`, `channel` |
-| Categories and their fields | inside information, PDMR dealing, results, general | 8-K items 1.01, 1.05, 2.02, 5.02, 5.07, 7.01, 8.01; 6-K for foreign private issuers | policy `categories`, each with a Zod schema (the UI form is generated from it) |
-| Deadline | MAR Art. 17 "as soon as possible" (a delay needs a recorded reason); PDMR 3 business days from the transaction; DTR 4 results deadlines | 8-K 4 business days from the event; 1.05 from the materiality determination; 7.01 and 8.01 voluntary (none); Reg FD later of 24 h or the next NYSE open | category `deadline` |
-| Approval | inside information: two approvals including the company secretary; others one | 8-K: legal plus one more; item 2.02 legal **and** the CFO | category `approval` (can depend on the metadata) |
-| Channel window | RNS hours, but inside information is never held for them | EDGAR 06:00 to 22:00 ET; after 17:30 ET the filing date is the next business day | policy `window`, `calendar`; category `releaseOutsideWindow`; the gateway stamps the filing date |
-| Identifiers | LEI (mod-97), ISIN (Luhn) | CIK and CCC shapes, filer status (domestic or foreign private issuer) | `issuerProfile` schema, `jurisdictions/identifiers.ts` |
-| Acknowledgement | RNS number | accession number and filing date | the gateway's `PublishAck` |
-| Failure semantics | transient (retry) or permanent (new revision) | EDGAR suspense is permanent | `GatewayError.kind` |
+| | UK | US | Denmark (EU) | Lives in |
+|---|---|---|---|---|
+| Regime and channel | UK MAR, Listing Rules, DTR; RNS | Exchange Act, Form 8-K, Reg FD; EDGAR | EU MAR, Transparency Directive; Nasdaq Copenhagen, stored in the Danish OAM | policy `code`, `channel` |
+| Categories and their fields | inside information, PDMR dealing, results, general | 8-K items 1.01, 1.05, 2.02, 5.02, 5.07, 7.01, 8.01; 6-K for foreign private issuers | the same four as the UK, each with a required **language** (Danish or English) | policy `categories`, each with a Zod schema (the UI form is generated from it) |
+| Deadline | MAR Art. 17 "as soon as possible" (a delay needs a recorded reason); PDMR 3 business days from the transaction; DTR 4 results deadlines | 8-K 4 business days from the event; 1.05 from the materiality determination; 7.01 and 8.01 voluntary (none); Reg FD later of 24 h or the next NYSE open | the same MAR and reporting rules as the UK, counted on the **Danish calendar** (Ascension Day is not a business day) | category `deadline`; the shared rules in `jurisdictions/mar.ts` |
+| Approval | inside information: two approvals including the company secretary; others one | 8-K: legal plus one more; item 2.02 legal **and** the CFO | as the UK | category `approval` (can depend on the metadata) |
+| Extra rules | | filer status, Exhibit 99.1, Reg FD flag | a **notification threshold** for managers' transactions (a warning below it); the Finanstilsynet notice only when disclosure was delayed | category `rules`, `postPublication` |
+| Channel window | RNS hours, but inside information is never held for them | EDGAR 06:00 to 22:00 ET; after 17:30 ET the filing date is the next business day | 07:00 to 22:00 Copenhagen, inside information never held | policy `window`, `calendar`; category `releaseOutsideWindow`; the gateway stamps the filing date |
+| Identifiers | LEI (mod-97), ISIN (Luhn) | CIK and CCC shapes, filer status | **CVR number** (modulus 11), LEI, ISIN | `issuerProfile` schema, `jurisdictions/identifiers.ts` |
+| Rendering | MAR statement in English | 8-K items, Exhibit 99.1 | MAR statement in the announcement's language (Danish or English) | policy `render` |
+| Acknowledgement | RNS number | accession number and filing date | company announcement number (`n/year`) | the gateway's `PublishAck` |
+| Failure semantics | transient (retry) or permanent (new revision) | EDGAR suspense is permanent | transient or permanent, the same contract | `GatewayError.kind` |
 
-**Where the difference stops.** Both policies answer the same six questions (`validate`, `approvalRequirement`, `timing`,
+**One regulation, written once.** The UK and the EU apply the same MAR text, so inside information, managers'
+transactions and the reporting deadlines live in `jurisdictions/mar.ts` and both policies plug in their own calendar,
+time zone and issue-code prefix (`UK_MAR_*`, `EU_MAR_*`). Denmark is 143 lines because the shared part is not repeated.
+
+**Where the difference stops.** All three policies answer the same six questions (`validate`, `approvalRequirement`, `timing`,
 `render`, `postPublication`, `describe`), and the workflow only ever asks those. It never asks "which country is this".
-Outside the tests, a search for `'UK'` or `'US'` in the server finds the policies, the demo data, the benchmarks and one rule in the mock AI, and nothing in the workflow.
+Outside the tests, a search for `'UK'`, `'US'` or `'DK'` in the server finds the policies, the demo data, the benchmarks and one rule in the mock AI, and nothing in the workflow.
 
 **The regulatory model was corrected after a domain review**, which is the honest evidence that it is a model and not a
 claim: the PDMR clock runs from the transaction, not from the notification (L-19); 7.01 and 8.01 have no deadline and 1.05
@@ -131,7 +141,7 @@ released even when the RNS window is closed (L-22). Logged in [discovery/ledger.
 
 ### What is written once
 
-The state machine and its transitions, revisions and hashing, maker-checker and approval binding, the publication runner
+The state machine and its transitions, revisions and hashing, the MAR rules the UK and the EU share (`mar.ts`), maker-checker and approval binding, the publication runner
 (lease, retry, idempotency, sweeper), the audit chain, tenant isolation, the event outbox, readers and subscriptions, the
 REST API, and the whole UI. Shared validation (headline length, empty body, leftover placeholders, issuer profile, schema,
 deadline passed) lives in `definePolicy` once.
@@ -150,9 +160,10 @@ policies from the server.
 
 ### Proof
 
-`operations.test.ts`, "adding a jurisdiction": registers a made-up country (`XX`) with one policy and one fake gateway and
-runs a draft to publication through the unchanged workflow; a second test shows an unregistered jurisdiction is refused
-with a clear error. `JurisdictionCode` is a plain string and no database column restricts it.
+Denmark is the proof. It was added as one policy file (`dk.ts`), one gateway class, two registrations and a profile in the
+seed, and the workflow was not touched. `operations.test.ts`, "adding a jurisdiction", registers Denmark as the **only**
+jurisdiction and runs a draft to publication through the unchanged workflow; a second check shows an unregistered one is
+refused with a clear error; `workflow.test.ts` covers Denmark end to end, including a retry. `JurisdictionCode` is a plain string and no database column restricts it.
 
 ### Costs and limits, stated
 
@@ -161,7 +172,7 @@ with a clear error. `JurisdictionCode` is a plain string and no database column 
   ([ARCHITECTURE §3](ARCHITECTURE.md#3-trade-offs-i-accepted)).
 - Two cosmetic places still list jurisdictions: `apps/web/src/examples.ts` (sample text for the "Fill with example
   content" button, optional) and `labels.ts` `SEND_NOUN` (the word "filing" for EDGAR; the default is "distribution").
-- The demo data, benchmarks and a mock-AI rule name UK and US; they are not logic.
+- The demo data, benchmarks and a mock-AI rule name UK and US (the AI pre-check rules were not extended to Denmark); they are not logic.
 - Policies are code, reviewed in a pull request. Policies from a database or an admin UI for non-engineers are a listed
   option, not built (ASR-2 in [handoff.md](../discovery/handoff.md)).
 - The extension guide: [MODULES.md, "Add a jurisdiction"](MODULES.md#add-a-jurisdiction).
@@ -170,17 +181,17 @@ with a clear error. `JurisdictionCode` is a plain string and no database column 
 
 | | Status |
 |---|---|
-| Draft to published in UK and US, through the UI, the REST demo and the tests | **Verified by running it** |
+| Draft to published in UK, US and Denmark, through the UI, the REST demo and the tests | **Verified by running it** |
 | Retry, exhaustion, permanent rejection, lost acknowledgement, lease takeover, lost wake-up | **Verified** (tests) |
 | Same suite on SQLite and on PostgreSQL + Redis, two worker processes, no double release | **Verified** |
 | OIDC against Keycloak, Authorization Code + PKCE through a real browser | **Verified** |
 | Compose twin: separate api, worker, notifier, agents; mail delivered; cache hit | **Verified** |
 | Throughput and latency numbers | **Measured** on a laptop under Azure-sized limits |
-| Azure Terraform | **Designed**; `validate`, tflint, trivy, checkov and 41 mocked tests pass; **never applied**. The unproven items and the check for each are in [infra/azure/README.md](../infra/azure/README.md) |
+| Azure Terraform | **Designed**; `validate`, tflint, trivy, checkov and 42 mocked tests pass; **never applied**. The unproven items and the check for each are in [infra/azure/README.md](../infra/azure/README.md) |
 | Second region and failover | **Designed**, never rehearsed ([DR.md](DR.md)) |
 | The Anthropic provider against the live API | Not exercised (tested against a stubbed `fetch`) |
 | Legal correctness of the rules | Not verified: simplified models, not legal advice |
-| Real RNS and EDGAR behaviour | Unknown without access; real providers have no idempotency-key lookup, so the "find before resubmit" step needs a different design there |
+| Real RNS, EDGAR and Nasdaq Copenhagen behaviour | Unknown without access; real providers have no idempotency-key lookup, so the "find before resubmit" step needs a different design there |
 
 ## 5. Questions I expect, and the short answers
 
@@ -191,8 +202,9 @@ with a clear error. `JurisdictionCode` is a plain string and no database column 
 - **How do you stop a double release?** The lease token, the idempotency key looked up at the wire before a resubmit, and a
   unique claim; tested with a crashed worker and a lost acknowledgement.
 - **What if the mail service is down?** The notification retries on its own delivery row; publishing is unaffected.
-- **How do I add the third market?** Section 3. The first one I would pick is EU or Nasdaq Copenhagen, because it tests the
-  abstraction on a shape other than UK and US ([questions.md](../discovery/questions.md) #1).
+- **How did you add the third market?** Section 3. Denmark reuses the MAR rules the UK uses and adds a language rule, a
+  notification threshold, a CVR number, its own calendar and its own channel. A fourth (Sweden, Germany) would reuse
+  `mar.ts` the same way; the first thing a very different regime could force is a new workflow transition (pre-clearance).
 - **Where would it break first?** Database connections and text search; the ADR has the numbers and the exit.
 - **Is the AI in the critical path?** No. It is advisory, behind a port, validated, and the whole workflow is tested with
   it off ([ARCHITECTURE §2.5](ARCHITECTURE.md#25-ai-is-advisory-and-optional)).

@@ -20,7 +20,7 @@ Status words used below: **Verified** (a test or a run proves it), **Measured** 
 that runs through email, spreadsheets and phone calls to a newswire: no enforced review, no proof of who approved what, and a
 duplicate or missed release is a regulatory incident.
 
-**In scope.** Draft, validate, review, approve, publish and audit an announcement in the UK (RNS) and the US (EDGAR); the
+**In scope.** Draft, validate, review, approve, publish and audit an announcement in the UK (RNS), the US (EDGAR) and Denmark (Nasdaq Copenhagen); the
 public archive and follow-by-email or webhook; an extension seam for new jurisdictions, consumers and agents.
 
 **Actors.** Author (IR team), approver (company secretary, general counsel, CFO), publisher (head of IR), auditor,
@@ -75,7 +75,7 @@ rules as code: Verified by `policies.test.ts`. Status of their legal correctness
 | NFR-4 | Durability | An acknowledged approval or acknowledgement is never lost; commit before enqueue; RPO 0 for the database in a zone | Verified (crash-after-claim, lost wake-up tests); Designed (zone-redundant database) | `workflow.test.ts`, [infra/azure/README.md](../infra/azure/README.md) |
 | NFR-5 | Exactly-once in effect | 0 duplicates in the crash and retry matrix | Verified; Measured (900 publications, 900 distinct references) | `workflow.test.ts`, `pgqueue.test.ts`, `bullmq.test.ts` |
 | NFR-6 | Audit | Tamper evidence; kept at least 5 years | Tamper evidence Verified. Retention: nothing deletes audit rows, but no archive or retention policy is built | `domain.test.ts`; [ARCHITECTURE §2.3](ARCHITECTURE.md#23-integrity-and-audit) |
-| NFR-7 | Gateway protection | A concurrency cap per gateway per worker, so a burst cannot exceed a vendor limit | Implemented (`GATEWAY_CONCURRENCY`); exercised in the benchmark; not tested against a real vendor limit | `publication-runner.ts` |
+| NFR-7 | Gateway protection | A concurrency cap per gateway per worker process; the vendor sees workers x the cap, so it is tuned against the vendor limit (a global cap is a next step) | Implemented (`GATEWAY_CONCURRENCY`); exercised in the benchmark; not tested against a real vendor limit | `publication-runner.ts` |
 | NFR-8 | Code boundaries | `domain` imports nothing from adapters or http; the application never imports an adapter | Verified, fails the build | `operations.test.ts` |
 | NFR-9 | Readers | Public reads cacheable 30 to 60 s; the subscription form limited per client; an address capped at 10 subscriptions | Verified locally; Designed at the Azure edge | `public-http.test.ts`, `edge.tf` |
 | NFR-10 | Outbox health | A delivery older than 5 minutes alerts; a dead delivery alerts; a failing consumer never delays publishing | Verified (metrics, isolation); Designed (Azure alerts) | `events.test.ts`, `monitoring.tf` |

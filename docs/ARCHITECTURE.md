@@ -42,20 +42,22 @@ is a `definePolicy({...})` value plus a gateway adapter, registered in a `Policy
 - categories, each with a **Zod schema** for its metadata (the UI form is generated from `z.toJSONSchema`, so a new category needs no UI work);
 - validation rules, deadlines and publication windows, post-publication obligations, rendering to the wire payload;
 - an approval requirement per category: `{ min, mustInclude: roles }`, which can depend on the metadata (US: an 8-K with item 2.02 needs legal **and** the CFO, other items need legal and one more);
-- identifier checks (LEI mod-97, ISIN Luhn, CIK/CCC shapes) and the business-day calendar.
+- identifier checks (LEI mod-97, ISIN Luhn, CIK/CCC shapes, CVR modulus 11) and the business-day calendar.
 
 Shared rules (e.g. maker-checker, content-hash binding) live in `definePolicy` defaults, once.
-**Evidence:** `operations.test.ts` registers a made-up third country with one policy and one fake
-gateway and runs it through the unchanged workflow. No workflow file is touched.
+**Evidence:** Denmark was added as the third jurisdiction with one policy file, one gateway class and two
+registrations; no workflow file changed. `operations.test.ts` runs it as the only registered jurisdiction through the
+unchanged workflow. The MAR rules the UK and Denmark share are written once (`jurisdictions/mar.ts`).
 
-What the two jurisdictions actually differ on, as modelled:
+What the three jurisdictions actually differ on, as modelled:
 
-| | UK | US |
-|---|---|---|
-| Timing | MAR Art. 17: as soon as possible (a delay needs a recorded reason); PDMR: 3 business days from the transaction (Art. 19(3)); DTR 4 results deadlines | 8-K: 4 business days from the event; Item 1.05 from the materiality determination; Items 7.01 and 8.01 are voluntary, no deadline; Reg FD: later of 24 h or the next NYSE open after the official learned of it; 6-K: promptly, no fixed instant |
-| Window | RNS hours; inside information is never held for them | EDGAR 06:00 to 22:00 ET; after 17:30 ET the filing date is the next business day |
-| Extra | PDMR / results categories | Filer status in the issuer profile (8-K for domestic filers, 6-K for foreign private issuers); Exhibit 99.1 required for item 2.02; Reg FD flag for item 7.01 |
-| Acknowledgement | RNS number | accession number + filing date |
+| | UK | US | Denmark (EU) |
+|---|---|---|---|
+| Timing | MAR Art. 17: as soon as possible (a delay needs a recorded reason); PDMR: 3 business days from the transaction (Art. 19(3)); DTR 4 results deadlines | 8-K: 4 business days from the event; Item 1.05 from the materiality determination; Items 7.01 and 8.01 are voluntary, no deadline; Reg FD: later of 24 h or the next NYSE open after the official learned of it; 6-K: promptly, no fixed instant | the same MAR and reporting rules, counted on the Danish calendar |
+| Window | RNS hours; inside information is never held for them | EDGAR 06:00 to 22:00 ET; after 17:30 ET the filing date is the next business day | 07:00 to 22:00 Copenhagen; inside information is never held |
+| Extra | PDMR / results categories | Filer status in the issuer profile (8-K for domestic filers, 6-K for foreign private issuers); Exhibit 99.1 required for item 2.02; Reg FD flag for item 7.01 | Language (Danish or English) required on every announcement; a notification threshold for managers' transactions; the regulator notice only when disclosure was delayed |
+| Identifiers | TIDM, LEI | CIK, CCC, ticker | CVR number, LEI, ticker |
+| Acknowledgement | RNS number | accession number + filing date | company announcement number |
 
 ### 2.2 Publishing is the risky step, so it is built to be reliable, not fast
 
@@ -65,7 +67,7 @@ Releasing a regulatory announcement twice, or not at all, is the worst failure i
 - **Lease with a token.** A worker claims a publication with a compare-and-set that sets a lease; finishing checks the token, so a worker that was too slow cannot overwrite the result of the one that took over. A second worker cannot claim a live lease.
 - **Idempotency key `announcementId:revision`** is sent to the wire, and the runner calls `find(key)` before `submit`. If the wire accepted but the acknowledgement was lost, the next attempt finds the filing instead of sending a duplicate. This is the "ack lost" demo mode.
 - **Retry policy:** transient errors back off exponentially with jitter up to a budget, then the publication is `exhausted` and the announcement `failed` with a visible **Retry** action; permanent rejections are not retried (the fix is a corrected revision).
-- **Per-gateway concurrency limit** per worker, to respect vendor rate limits, and a **timeout** on every gateway call (half the lease) so a hung vendor connection fails as transient and frees its slot instead of blocking the channel.
+- **Per-gateway concurrency limit** per worker, to respect vendor rate limits, and a **timeout** on every gateway call (half the lease) so a hung vendor connection fails as transient and frees its slot instead of blocking the channel. **The cap is per worker process, not global**: each worker holds its own in-memory semaphore, so N workers can have up to N x `GATEWAY_CONCURRENCY` calls open at the same vendor (default 2; the Azure ceiling of 6 workers is 12). Keep `worker_replicas.max x GATEWAY_CONCURRENCY` under the vendor's published limit. A true global cap needs shared state (a counter or lease in the database or Redis) and is a next step (section 7), not built.
 - **Anything unexpected after a claim** (a throw in a rule, a store error) is routed through the same retry budget, so a publication always ends in a visible state and never loops on lease expiry.
 - **Delayed wake-ups can land early** (timer and database clocks differ by a millisecond). The runner re-arms them rather than dropping them. A stress run found exactly this race (a dropped wake-up when the remainder had already elapsed), now fixed and covered.
 
@@ -126,7 +128,8 @@ What exists and was checked:
 
 - **Stateless API** processes behind any load balancer; all state in PostgreSQL. A signed token is verified locally (cached keys), so authentication adds no shared state.
 - **Workers scale horizontally**: `docker compose up --scale worker=3` ran end to end, and a test runs two worker processes against one Postgres and one Redis over eight publications and asserts eight distinct releases, no duplicates.
-- **Backpressure and fairness** come from per-worker job concurrency and per-gateway concurrency.
+- **Backpressure and fairness** come from per-worker job concurrency and per-gateway concurrency, both per process (the vendor-facing total is workers x the cap, see section 2.2).
+- **Worker autoscaling is a safety net, not the capacity.** The Azure worker rule scales on CPU, and a worker waiting on a slow vendor is idle, so CPU does not see a publishing backlog. Capacity is the floor (2 workers, about 15 publications a second measured, against a peak of 0.17), and the backlog is watched by an alert on the age of the oldest due publication (the worker logs it every minute). A backlog-driven scaler is not wired because the database is Entra-only (no password for a KEDA `postgresql` scaler) and `/metrics` sits behind the edge check; it arrives with Service Bus (KEDA `azure-servicebus`, managed identity) at the ADR 0001 triggers.
 - **Hot paths are indexed row lookups.** The one scan, the sweeper, reads overdue publications in batches of 100.
 
 **Measured** (`npm run bench`, Compose stack on one laptop under Docker Desktop, REST only, 300 announcements, 20 in flight, mock newswire answering in 200 ms, per-worker gateway concurrency 2):
@@ -167,9 +170,9 @@ Next steps for real scale: partitioning or archiving the audit table, a connecti
 | Queue | `LISTEN/NOTIFY` | same; direct port 5432, not the built-in pooler |
 | Network | one compose network | VNet, a /23 for the containers (443 in), a /28 for the database that admits only that subnet |
 | Delivery | `docker compose up --build` | GitHub Actions with a federated credential, image promoted by digest, migrate, roll out, smoke test (written, not run) |
-| Operations | `/metrics`, logs | Log Analytics, 8 alerts (replicas below floor, restarts, 5xx, database CPU, storage, connections, a failed publication) plus a replica alert per consumer set, outbox lag and dead deliveries, budget |
+| Operations | `/metrics`, logs | Log Analytics, 8 alerts (replicas below floor, restarts, 5xx, database CPU, storage, connections, a failed publication) plus a publishing backlog alert, a replica alert per consumer set, outbox lag and dead deliveries, budget |
 
-What is verified offline and what is not is in [infra/azure/README.md](../infra/azure/README.md): `validate` against the real provider schemas, 41 mocked-provider tests of the security and resilience properties, tflint, trivy and checkov all pass; **nothing was applied**, so Azure's acceptance of the configuration, the Entra token claims, the managed-identity database login and the alert metric names are unproven, each with a named check for the first deploy. Also unproven: mail through the managed identity, Front Door caching and the proxy hop count behind it, the consumer-set alerts. Built but equally unproven: the private network (registry and vault private endpoints, NAT egress, Private Link from Front Door), the second region (`docs/DR.md`, never rehearsed), the landing zone (`infra/azure-landing-zone`). The database's limits and the triggers to add a message broker are in `docs/adr/0001-database-bottleneck-and-service-bus.md`. Not included on purpose: an egress firewall (the NAT gateway gives one address, no filtering), tracing, a message broker.
+What is verified offline and what is not is in [infra/azure/README.md](../infra/azure/README.md): `validate` against the real provider schemas, 42 mocked-provider tests of the security and resilience properties, tflint, trivy and checkov all pass; **nothing was applied**, so Azure's acceptance of the configuration, the Entra token claims, the managed-identity database login and the alert metric names are unproven, each with a named check for the first deploy. Also unproven: mail through the managed identity, Front Door caching and the proxy hop count behind it, the consumer-set alerts. Built but equally unproven: the private network (registry and vault private endpoints, NAT egress, Private Link from Front Door), the second region (`docs/DR.md`, never rehearsed), the landing zone (`infra/azure-landing-zone`). The database's limits and the triggers to add a message broker are in `docs/adr/0001-database-bottleneck-and-service-bus.md`. Not included on purpose: an egress firewall (the NAT gateway gives one address, no filtering), tracing, a message broker.
 
 ## 5. What was cut, and why
 
@@ -189,9 +192,9 @@ Cut in this order, to protect the end-to-end flow, test quality and publish reli
 
 Verified by running it:
 
-- Draft to published in UK and US through the UI, the REST demo and the tests.
+- Draft to published in UK, US and Denmark through the UI, the REST demo and the tests.
 - Retry with backoff, exhaustion and manual retry, permanent rejection, lost acknowledgement (reconciled), lease takeover after a crash, lost wake-up recovery by the sweeper.
-- Same suite on SQLite (176 passing, 7 integration tests skipped) and on PostgreSQL + Redis (183 tests, including two workers), plus 12 UI logic tests. The screens are described in docs/UI.md.
+- Same suite on SQLite (188 passing, 7 integration tests skipped) and, before Denmark was added, on PostgreSQL + Redis (183 tests, including two workers; not repeated since), plus 12 UI logic tests. The screens are described in docs/UI.md.
 - Real authentication: tokens verified against a JWKS (valid, expired, wrong audience or issuer, forged, unknown role, provider down), and sign-in with Authorization Code + PKCE through a real browser against Keycloak.
 - The PostgreSQL queue on a real database, with two workers and after the listener connection is cut.
 - The Compose twin (Keycloak, PostgreSQL queue, migrate job, 2 workers) with the demo and a benchmark using real tokens.
@@ -203,7 +206,7 @@ Verified by running it:
 
 Not verified, or only designed:
 
-- **Everything on Azure.** The Terraform passes validate, tflint, trivy, checkov and 41 mocked tests; it was never applied. Unproven until the first deploy: Entra app roles in the token, the managed-identity database login, `LISTEN/NOTIFY` through the managed server, the container subnet and NSG, the alert metric names, the deploy workflow, Private Link from Front Door, the build agent pool, the second region's replica, failover and restore times (`infra/azure/scripts/smoke.sh` checks what a running deployment can answer).
+- **Everything on Azure.** The Terraform passes validate, tflint, trivy, checkov and 42 mocked tests; it was never applied. Unproven until the first deploy: Entra app roles in the token, the managed-identity database login, `LISTEN/NOTIFY` through the managed server, the container subnet and NSG, the alert metric names, the deploy workflow, Private Link from Front Door, the build agent pool, the second region's replica, failover and restore times (`infra/azure/scripts/smoke.sh` checks what a running deployment can answer).
 - Performance on Azure (the measurements are a laptop under Azure-sized limits).
 
 - The Anthropic provider against the live API (the request/response shape is tested against a stubbed `fetch`).
@@ -215,10 +218,12 @@ Known, deliberately not fixed (noted by the reviews): `DEMO` defaults to on so t
 
 ## 7. What I would do next
 
-1. **A third jurisdiction** (EU/ESMA via a national channel, or Nasdaq Copenhagen) to test the abstraction on a shape other than UK/US; add a "regulator pre-clearance" transition if it needs one.
+1. **A fourth jurisdiction** on a different shape (Sweden, Germany, or a regime with regulator pre-clearance, which needs a new transition). Denmark, the third, reused the MAR rules shared with the UK and needed no workflow change.
 2. **Transactional outbox** for enqueue, so a crash between commit and enqueue never relies on the sweeper.
 3. **Row-level security** in Postgres as a second tenant-isolation layer under the query filter.
 4. **Anchoring audit chain heads** to write-once storage (or a signed timestamp) to turn tamper-evident into tamper-resistant.
 5. **OpenTelemetry**: traces across api, queue, worker and the wire; metrics for lease takeovers, retries, time to acknowledgement; alerts on exhausted publications.
 6. **Evaluation gate for the real LLM:** a labelled set of announcements and a threshold on recall for risk flags before the provider is allowed on in production.
 7. **First deploy to a `test` subscription** following `infra/azure/README.md`, then record the failover and restore times in SIZING.md; add per-role step-up for publish and scheduled / embargoed release.
+8. **A global gateway limit** (a shared counter or lease per channel), so the vendor-facing concurrency is a fixed number and not workers x `GATEWAY_CONCURRENCY`.
+9. **Separate "accepted" from "published"**: today `acked` means the channel answered with a reference. Real channels have more stages (received, accepted, disseminated; EDGAR also suspends), so the publication would move through `submitted`, `accepted`, `published` with a poll or callback between them. Worth doing at the first contact with a real channel, not before: the stages are only known from the real contract.

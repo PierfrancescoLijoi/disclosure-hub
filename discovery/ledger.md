@@ -6,7 +6,7 @@ Domain: `fintech` (primary), `saas-b2b` + `ai-llm` (secondary). Client: Board In
 |---|---|---|---|---|
 | L-1 | Domain = fintech primary, saas-b2b + ai-llm secondary | Confirmed (user) | Sets compliance/audit/idempotency lens | - |
 | L-2 | Product = enterprise B2B IR + regulated-disclosure platform | Confirmed (user) | Multi-tenant (issuer = tenant) | - |
-| L-3 | Jurisdictions = UK (RNS/UK MAR) + US (EDGAR/Form 8-K/Reg FD) | Confirmed (task) | Two policies + two gateways | - |
+| L-3 | Jurisdictions = UK (RNS/UK MAR) + US (EDGAR/Form 8-K/Reg FD); Denmark (Nasdaq Copenhagen/EU MAR) added as the third (see L-15) | Confirmed (task: at least two) | Three policies + three gateways | - |
 | L-4 | Stack = TypeScript end-to-end, Fastify + Zod REST, modular monolith | Confirmed (user) | No microservices, no Python | - |
 | L-5 | Frontend = React (Vite SPA, not Next.js) | Assumed | `npm start` stays one process; UI only needs REST | Swap later if SSR needed |
 | L-6 | Two run modes: local (SQLite + in-process queue) and Compose (Postgres + Redis/BullMQ + api + worker + web) | Confirmed (user) | Only infra adapters differ | - |
@@ -18,7 +18,7 @@ Domain: `fintech` (primary), `saas-b2b` + `ai-llm` (secondary). Client: Board In
 | L-12 | Newswires/filing systems are mocks that behave like real ones (ack, suspense, dedupe key, outages) | Assumed | Reliability code is real, gateway is fake | Real: vendor APIs |
 | L-13 | Scale shape = spiky (earnings season, 07:00 UK / 16:05 ET clusters), low steady rate; external gateway limits are the ceiling | Assumed | Per-gateway concurrency cap, DB as source of truth | Validate with real volumes |
 | L-14 | Out of scope: scheduling/embargo timers, attachments, iXBRL, translations, billing (real OIDC is now built) | Assumed | Listed in write-up as cuts | - |
-| L-15 | Which third jurisdiction would the business want first (EU/Nasdaq Copenhagen likely)? | Open-nonblocking | Roadmap only | Ask panel (questions.md) |
+| L-15 | Which third jurisdiction would the business want first (EU/Nasdaq Copenhagen likely)? | Assumed: Denmark (EU MAR, Nasdaq Copenhagen), built 5 Nov | Third jurisdiction in the product | Confirm with the business (questions.md) |
 | L-16 | Scale = one listed group or a small IR agency, not a market operator (replaces the 5,000-issuer figure) | Assumed | Sizing, cost, Azure SKUs | Validate with real volumes (docs/SIZING.md) |
 | L-17 | Azure deployment is written and validated offline, never applied; Compose is the local twin | Confirmed (user) | "Verified" vs "designed" split in README and ARCHITECTURE | First deploy to a test subscription |
 | L-18 | UI follows the SignalFlow IR product spec at P0, adapted to this backend; product name is Disclosure Hub | Confirmed (user) | No admin role, no Company Pulse; deviations in docs/UI.md | P1/P2 later |

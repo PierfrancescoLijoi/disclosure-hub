@@ -1,10 +1,10 @@
 # Spec: Disclosure Hub
 
 ## Problem
-Listed issuers must release regulated information to the market under jurisdiction-specific rules (UK MAR Art. 17 via a Regulatory Information Service such as RNS; US Form 8-K / Reg FD via EDGAR). Today this runs through email, spreadsheets and phone calls to a newswire: no enforced review, no proof of who approved what, and a duplicate or missed release is a regulatory incident.
+Listed issuers must release regulated information to the market under jurisdiction-specific rules (UK MAR Art. 17 via a Regulatory Information Service such as RNS; US Form 8-K / Reg FD via EDGAR; EU MAR via Nasdaq Copenhagen, with the Danish OAM storing the announcement). Today this runs through email, spreadsheets and phone calls to a newswire: no enforced review, no proof of who approved what, and a duplicate or missed release is a regulatory incident.
 
 ## Goals (measurable)
-- G1: one workflow takes an announcement from draft to published acknowledgement in UK and US; adding a jurisdiction touches zero workflow code (proved by a test).
+- G1: one workflow takes an announcement from draft to published acknowledgement in the UK, the US and Denmark; adding a jurisdiction touches zero workflow code (proved by a test).
 - G2: publication is exactly-once in effect: no duplicate and no lost release across retries, worker crashes and gateway timeouts (proved by tests).
 - G3: every state change is recorded in a tamper-evident audit trail, and approvals are bound to the exact content approved.
 - G4: same business logic, API and state transitions in both run modes; only infrastructure adapters differ.
@@ -33,7 +33,7 @@ Author (IR team), Approver (company secretary, general counsel, CFO), Publisher 
   - US-4.2 Given a transient gateway failure, then the system retries with backoff and jitter without duplicating the release.
   - US-4.3 Given a permanent rejection (e.g. EDGAR suspense), then the announcement is `failed` with the reason, and can be reopened as a new revision.
   - US-4.4 Given a crash after the gateway accepted but before the ack was stored, then retry reconciles by idempotency key and stores one ack.
-  - US-4.5 On success the ack (RNS number or EDGAR accession, filing date) is stored and the status is `published`.
+  - US-4.5 On success the ack (RNS number, EDGAR accession and filing date, or Nasdaq Copenhagen company announcement number) is stored and the status is `published`.
 - EP-5 Audit
   - US-5.1 As an auditor I list every event for an announcement and verify the hash chain.
 - EP-6 AI pre-check (advisory)
@@ -83,7 +83,7 @@ Author (IR team), Approver (company secretary, general counsel, CFO), Publisher 
 - NFR-4 Durability: an acknowledged approval or ack is never lost (commit before enqueue; DB is source of truth). RPO 0 on the DB.
 - NFR-5 Exactly-once in effect per (announcement, revision): 0 duplicates in the crash/retry test matrix.
 - NFR-6 Audit retained at least 5 years (MAR Art. 17(1) website retention; filing records); tamper evidence verified by chain walk.
-- NFR-7 Gateway protection: concurrency cap per gateway, so a burst cannot exceed vendor limits.
+- NFR-7 Gateway protection: concurrency cap per gateway per worker process; the vendor-facing total is workers x the cap, so it is tuned against the vendor limit (a global cap is a next step).
 - NFR-9 Readers: public reads are cacheable for 30 to 60 seconds so a crowd after a big announcement costs the origin one read per lifetime; the subscription form is limited per client (5 an hour at the API, a rate rule at the edge) and an address is capped at 10 subscriptions. Meter: edge cache status, 429 counts.
 - NFR-10 Outbox: a delivery older than 5 minutes alerts; a delivery that used all its attempts (`dead`) alerts; a failing consumer never delays publishing. Meter: oldest pending delivery, dead deliveries (also in /metrics).
 - NFR-8 Code boundary: `domain` imports nothing from adapters/http (checked by test).

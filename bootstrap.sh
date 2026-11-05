@@ -6,7 +6,7 @@
 #
 #   sh bootstrap.sh              set up and start
 #   sh bootstrap.sh --no-start   prepare everything, do not start
-#   sh bootstrap.sh --demo       with the app running in another terminal: publish one UK and one US announcement through the API
+#   sh bootstrap.sh --demo       with the app running in another terminal: publish one announcement in each jurisdiction (UK, US, Denmark) through the API
 set -eu
 
 NODE_VERSION=22.23.4   # the version this was tested with; any Node 22 or newer works

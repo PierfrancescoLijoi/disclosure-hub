@@ -1,18 +1,18 @@
 # Disclosure Hub
 
-Regulatory announcements for listed companies: an announcement goes from **draft to published** in two
-jurisdictions, with one shared workflow and per-jurisdiction rules and delivery.
+Regulatory announcements for listed companies: an announcement goes from **draft to published** in three
+jurisdictions (UK, US and Denmark), with one shared workflow and per-jurisdiction rules and delivery.
 
-| | UK | US |
-|---|---|---|
-| Regime | UK MAR, Listing Rules, DTR | Exchange Act, Form 8-K, Reg FD |
-| Channel | RNS (mock) | SEC EDGAR (mock) |
-| Categories | inside information, PDMR dealing, results, general | Form 8-K (items 1.01, 2.02, 5.02, 7.01, 8.01) |
-| Acknowledgement | RNS number, e.g. `0001B` | accession number, e.g. `0001234567-26-000001` |
+| | UK | US | Denmark (EU) |
+|---|---|---|---|
+| Regime | UK MAR, Listing Rules, DTR | Exchange Act, Form 8-K, Reg FD | EU MAR, Transparency Directive |
+| Channel | RNS (mock) | SEC EDGAR (mock) | Nasdaq Copenhagen (mock) |
+| Categories | inside information, PDMR dealing, results, general | Form 8-K (items 1.01, 2.02, 5.02, 7.01, 8.01) | the UK's four, plus a required language (Danish or English) |
+| Acknowledgement | RNS number, e.g. `0001B` | accession number, e.g. `0001234567-26-000001` | company announcement number, e.g. `1/2026` |
 
 > **The rules are simplified models, not legal advice.** They show how jurisdiction logic is
 > expressed and enforced, and they are only as good as their stated sources. Real use needs review by
-> counsel and the real channel integrations. Both newswires are mocks. Sign-in is real OIDC in the container and Azure
+> counsel and the real channel integrations. All three newswires are mocks. Sign-in is real OIDC in the container and Azure
 > setups (Keycloak locally, Microsoft Entra ID on Azure); `npm start` uses seeded personas for a zero-install demo.
 
 ## Quick start from a clean computer
@@ -72,7 +72,7 @@ npm start
 
 ### 3. Use it
 
-On the sign-in page pick **alice** (author), write and submit an announcement for the UK or the US, then
+On the sign-in page pick **alice** (author), write and submit an announcement for the UK, the US or Denmark, then
 sign in as the approvers (**bob**, **carol**, **dan**) and approve, then as **erin** to publish. The step-by-step walk-through
 is under [Try it](#try-it). To watch the whole flow without a browser, with the app running, open a second terminal in the same folder and run `bootstrap.cmd -Demo` (Windows), `sh bootstrap.sh --demo` (Linux, macOS) or, if you installed Node yourself:
 
@@ -80,7 +80,7 @@ is under [Try it](#try-it). To watch the whole flow without a browser, with the 
 npm run demo
 ```
 
-It publishes one UK and one US announcement through the REST API and prints the acknowledgements and the audit-chain check.
+It publishes one announcement in each jurisdiction (UK, US, Denmark) through the REST API and prints the acknowledgements and the audit-chain check.
 
 **Stop** with `Ctrl+C`. **Start from scratch** by deleting the `apps/server/data/` folder. **Run the tests** with `npm test`.
 
@@ -95,10 +95,10 @@ design and Terraform only and is not needed to run anything.
 
 | The brief asked for | Answer in one line | Detail |
 |---|---|---|
-| A working system: draft to published in each of two jurisdictions | UK (RNS) and US (EDGAR, 8-K) through one workflow; mock newswires; `npm start` | [Run it](#run-it), [Try it](#try-it) |
+| A working system: draft to published in each of three jurisdictions | UK (RNS), US (EDGAR, 8-K) and Denmark (Nasdaq Copenhagen, EU MAR) through one workflow; mock newswires; `npm start` | [Run it](#run-it), [Try it](#try-it) |
 | A system built for scale, in the code and the architecture | Enforced module boundaries; the database row is the truth and the queue a hint; an event outbox; processes split by role; measured and sized | [BRIEF-RESPONSE §1](docs/BRIEF-RESPONSE.md#1-built-for-scale-in-the-code-and-in-the-architecture), [SIZING](docs/SIZING.md) |
 | A clear way of handling regulatory and operational differences | Regulatory rules live in a **policy**, delivery in a **gateway adapter** | [BRIEF-RESPONSE §2](docs/BRIEF-RESPONSE.md#2-regulatory-and-operational-differences-two-kinds-two-homes) |
-| No duplicated effort, extensible to more jurisdictions | The workflow exists once; a jurisdiction is one policy file, one gateway and two registrations; the UI reads it from the server; a test adds a made-up country | [BRIEF-RESPONSE §3](docs/BRIEF-RESPONSE.md#3-without-duplicating-effort-extending-to-more-jurisdictions), [MODULES](docs/MODULES.md#add-a-jurisdiction) |
+| No duplicated effort, extensible to more jurisdictions | The workflow exists once; a jurisdiction is one policy file, one gateway and two registrations; the UI reads it from the server; Denmark was added that way, with no workflow change | [BRIEF-RESPONSE §3](docs/BRIEF-RESPONSE.md#3-without-duplicating-effort-extending-to-more-jurisdictions), [MODULES](docs/MODULES.md#add-a-jurisdiction) |
 
 What is **verified by running it**, what is **measured** on a laptop and what is only **designed** (the whole Azure
 deployment) is stated in [BRIEF-RESPONSE §4](docs/BRIEF-RESPONSE.md#4-verified-measured-designed).
@@ -209,7 +209,7 @@ Personas (in `npm start` pick one on the sign-in page, the API reads the `x-user
 
 | Persona | Roles | Company |
 |---|---|---|
-| `alice` | author | Northwind Energy plc (UK + US) |
+| `alice` | author | Northwind Energy plc (UK + US + DK) |
 | `bob` | company secretary | Northwind |
 | `carol` | general counsel (legal) | Northwind |
 | `dan` | CFO | Northwind |
@@ -245,12 +245,12 @@ and run `AUTH=oidc GATEWAY_LATENCY_MS=200 N=200 CONCURRENCY=5 npm run bench`. Re
 
 ## Observability
 
-`GET /metrics` (Prometheus text, on the API port): publications and announcements by status, and the age of the oldest publication waiting for a worker. That last gauge is the one to alert on: it grows when workers are down, the queue is lost, or a newswire is failing. It is not proxied by the nginx container; keep it off the public edge. Logs are structured JSON.
+`GET /metrics` (Prometheus text, on the API port): publications and announcements by status, and the age of the oldest publication waiting for a worker. That last gauge is the one to alert on: it grows when workers are down, the queue is lost, or a newswire is failing (on Azure the workers log it every minute and a Log Analytics alert fires past 2 minutes; CPU autoscaling cannot see this backlog, so the worker floor of 2 is the capacity). It is not proxied by the nginx container; keep it off the public edge. Logs are structured JSON.
 
 ## Tests
 
 ```bash
-npm test               # 176 server tests pass; 7 integration tests need PostgreSQL or Redis and are skipped
+npm test               # 188 server tests pass; 7 integration tests need PostgreSQL or Redis and are skipped
 npm test -w apps/web   # 12 UI logic tests (diff, attention queue, readiness)
 npm run typecheck
 ```
@@ -263,7 +263,7 @@ docker run -d --name hub-test-redis -p 56379:6379 redis:7-alpine
 
 TEST_PG_URL=postgres://hub:hub-dev-only@localhost:55432/hub_test \
 TEST_REDIS_URL=redis://localhost:56379 \
-npm test -w apps/server -- --no-file-parallelism     # 183 server tests
+npm test -w apps/server -- --no-file-parallelism     # all 195 server tests (last run on PostgreSQL + Redis at 183, before Denmark was added)
 ```
 
 With `TEST_PG_URL` every integration test runs on PostgreSQL (the schema is dropped and recreated per
@@ -274,10 +274,10 @@ are missing.
 What the tests cover:
 
 - `domain`: state machine, permissions, content hash, audit chain tamper detection, business-day calendar and time-zone windows.
-- `policies`: UK and US validation, deadlines, approval requirements, rendering, identifier checks (LEI, ISIN).
-- `workflow`: the full draft to published path in both jurisdictions, revisions and voided approvals, retry, lost acknowledgement, lease takeover, lost wake-up recovery, idempotent publish, permanent rejection.
+- `policies`: UK, US and Denmark validation, deadlines, approval requirements, rendering, identifier checks (LEI, ISIN, CVR).
+- `workflow`: the full draft to published path in all three jurisdictions, revisions and voided approvals, retry, lost acknowledgement, lease takeover, lost wake-up recovery, idempotent publish, permanent rejection.
 - `hardening`: approvals bound to the reviewed revision, a hanging gateway times out and fails visibly, rate limits per actor, metrics output, the sweeper indexes, concurrent idempotent create.
-- `operations`: publication windows, adding a third jurisdiction without touching the workflow, AI pre-check safety, an architecture test that fails the build on forbidden imports.
+- `operations`: publication windows, Denmark as the only registered jurisdiction running through the unchanged workflow, AI pre-check safety, an architecture test that fails the build on forbidden imports.
 - `auth`: OIDC bearer tokens against a local JWKS: valid, expired, wrong audience or issuer, forged signature, unknown role, discovery down (503), company from claim.
 - `pgqueue`: the PostgreSQL `LISTEN/NOTIFY` queue on a real database, two workers, and recovery after the listener connection is cut.
 - `events`: the outbox (delivered once, retry with back-off, dead, lease takeover, per-process consumer filter) and agents (autorun, a second agent chained on the first, one report per event, bounded ping-pong, invalid output rejected, a failing agent never blocks the workflow, the agent only gets a copy).
@@ -341,9 +341,9 @@ same with `AI_PROVIDER=off`.
 ```
 apps/server/src
   domain/         pure rules: state machine, permissions, hashing, calendar, policy contract
-  jurisdictions/  UK and US policies, identifiers, holiday calendars  (the plug-in point)
+  jurisdictions/  UK, US and Denmark policies, the shared MAR rules, identifiers, holiday calendars  (the plug-in point)
   ports/          interfaces the application depends on
-  adapters/       db (Kysely: SQLite, Postgres), queue (in-process, Postgres LISTEN/NOTIFY, BullMQ), gateways (mock RNS, EDGAR), ai, channels (email, webhook)
+  adapters/       db (Kysely: SQLite, Postgres), queue (in-process, Postgres LISTEN/NOTIFY, BullMQ), gateways (mock RNS, EDGAR, Nasdaq Copenhagen), ai, channels (email, webhook)
   application/    announcement service, publication runner, pre-check, event bus and reactor, agents, readers (subscriptions, notifier, feed)
   auth/           OIDC bearer-token verification (Entra ID, Keycloak)
   http/           Fastify routes, auth hook, rate limit, metrics, public routes, static web serving
