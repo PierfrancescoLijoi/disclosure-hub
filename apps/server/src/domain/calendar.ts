@@ -71,17 +71,23 @@ export function isBusinessDay(civil: CivilDate, cal: Calendar): boolean {
   return wd !== 0 && wd !== 6 && !cal.holidays.has(civil);
 }
 
-function shift(civil: CivilDate, days: number): CivilDate {
+/** Calendar-day arithmetic (not business days). */
+export function addDays(civil: CivilDate, days: number): CivilDate {
   const d = new Date(`${civil}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+/** Whole calendar days from `from` to `to` (negative when `to` is earlier). */
+export function daysBetween(from: CivilDate, to: CivilDate): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
 export function addBusinessDays(civil: CivilDate, n: number, cal: Calendar): CivilDate {
   let cur = civil;
   let left = n;
   while (left > 0) {
-    cur = shift(cur, 1);
+    cur = addDays(cur, 1);
     if (isBusinessDay(cur, cal)) left--;
   }
   return cur;

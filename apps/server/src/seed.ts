@@ -21,7 +21,7 @@ export async function seedDemo(db: Kysely<DB>): Promise<void> {
       profiles: {
         UK: { tidm: 'NWE', lei: makeLei('5299000NORTHWINDEN') },
         US: { cik: '0001234567', ccc: 'nw3n3rgy', ticker: 'NWEY', filerStatus: 'domestic' },
-        DK: { cvr: '12345674', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE' },
+        DK: { cvr: '12345674', lei: makeLei('5299000NORTHWINDDK'), ticker: 'NWE', market: 'main' },
       },
     },
     {

@@ -4,19 +4,33 @@ const DISCLAIMER =
   'Advisory output to support human review. It is not legal advice, does not decide whether information is inside or material, and never approves or blocks a release.';
 
 const SIGNALS: Record<string, RegExp> = {
-  inside_information: /acquisition|merger|takeover|profit warning|trading update|restructuring|resign|insolven|delist|material contract|regulatory (approval|investigation)/i,
-  results: /full[- ]year|half[- ]year|interim|annual results|revenue|ebitda|earnings per share|net income/i,
-  pdmr_dealing: /pdmr|director dealing|purchase of shares|sale of shares|closely associated|transaction in own shares/i,
+  inside_information: /acquisition|merger|takeover|profit warning|trading update|restructuring|resign|insolven|delist|material contract|regulatory (approval|investigation)|opk\u00f8b|fusion|nedjustering|opjustering|konkurs|afnotering/i,
+  results: /full[- ]year|half[- ]year|interim|annual results|revenue|ebitda|earnings per share|net income|\u00e5rsrapport|halv\u00e5rsrapport|regnskab/i,
+  pdmr_dealing: /pdmr|director dealing|purchase of shares|sale of shares|closely associated|transaction in own shares|ledende medarbejdere|n\u00e6rtst\u00e5ende/i,
+  major_shareholding: /major shareholder|voting rights|crossed the .{0,12}threshold|flagging|st\u00f8rre aktion\u00e6r|stemmerettigheder/i,
+  share_buyback: /buy-?back|repurchase|treasury shares|tilbagek\u00f8b|egne aktier/i,
+  general_meeting: /general meeting|\bAGM\b|\bEGM\b|generalforsamling/i,
   form_8k: /8-k|item\s*\d\.\d{2}|earnings release|results of operations|regulation fd/i,
 };
-const PRICE_SENSITIVE = /profit warning|acquisition|merger|takeover|guidance|resign|insolven|delist|material contract|investigation|restatement/i;
+const PRICE_SENSITIVE = /profit warning|acquisition|merger|takeover|guidance|resign|insolven|delist|material contract|investigation|restatement|opk\u00f8b|fusion|nedjustering|opjustering|konkurs|afnotering/i;
 const AUDIENCE = '(?:analyst|investor|shareholder|institutional)s?';
 const EVENT = '(?:call|briefing|meeting|one-on-one|roadshow|conference|dinner)';
 const SELECTIVE = new RegExp(`\\b${AUDIENCE}\\b.{0,60}\\b${EVENT}\\b|\\b${EVENT}\\b.{0,60}\\b${AUDIENCE}\\b`, 'i');
-const LEAK = /rumou?r|leak|market speculation|press reports/i;
-const FORWARD_LOOKING = /\b(expect|anticipate|outlook|guidance|forecast|projected?)\b/i;
-const CAUTION = /forward-looking|risks and uncertainties|safe harbou?r/i;
-const CONTACT = /enquiries|inquiries|contact|investor relations/i;
+const LEAK = /rumou?r|leak|market speculation|press reports|rygter|l\u00e6kage/i;
+const FORWARD_LOOKING = /\b(expect|anticipate|outlook|guidance|forecast|projected?|forventer|forventning)\b/i;
+const CAUTION = /forward-looking|risks and uncertainties|safe harbou?r|fremadrettede udsagn|risici og usikkerhed/i;
+const CONTACT = /enquiries|inquiries|contact|investor relations|henvendelser|kontakt/i;
+
+const DANISH_WORDS = /\b(og|af|til|er|har|med|p\u00e5|den|det|som|ikke|selskabet|bestyrelsen)\b/gi;
+const ENGLISH_WORDS = /\b(the|and|of|to|is|has|with|for|that|company|board)\b/gi;
+
+/** The language the text really reads as, or null when it is too short or too mixed to tell. */
+const languageOf = (text: string): 'da' | 'en' | null => {
+  if (text.length < 120) return null;
+  const da = text.match(DANISH_WORDS)?.length ?? 0;
+  const en = text.match(ENGLISH_WORDS)?.length ?? 0;
+  return da > en * 2 ? 'da' : en > da * 2 ? 'en' : null;
+};
 
 const snippet = (text: string, re: RegExp): string => {
   const m = re.exec(text);
@@ -41,7 +55,7 @@ export class MockPreCheckProvider implements PreCheckProvider {
     const suggested = best?.key ?? (input.categories.includes('general') ? 'general' : input.category);
 
     const risks: {
-      regime: 'UK_MAR' | 'US_REG_FD' | 'GENERAL';
+      regime: 'UK_MAR' | 'EU_MAR' | 'US_REG_FD' | 'GENERAL';
       code: string;
       severity: 'low' | 'medium' | 'high';
       evidence: string;
@@ -49,24 +63,37 @@ export class MockPreCheckProvider implements PreCheckProvider {
       suggestedAction: string;
     }[] = [];
 
-    if (input.jurisdiction === 'UK' && input.category !== 'inside_information' && PRICE_SENSITIVE.test(text)) {
+    const mar = input.jurisdiction === 'UK' ? ('UK_MAR' as const) : input.jurisdiction === 'DK' ? ('EU_MAR' as const) : null;
+    if (mar && input.category !== 'inside_information' && PRICE_SENSITIVE.test(text)) {
       risks.push({
-        regime: 'UK_MAR',
-        code: 'UK_MAR_POSSIBLE_INSIDE_INFORMATION',
+        regime: mar,
+        code: `${mar}_POSSIBLE_INSIDE_INFORMATION`,
         severity: 'high',
         evidence: snippet(text, PRICE_SENSITIVE),
         explanation: 'The wording suggests information that could be inside information, but the category is not inside_information.',
         suggestedAction: 'Ask the company secretary to assess whether this is inside information. If disclosure is delayed, record the Art. 17(4) conditions.',
       });
     }
-    if (input.jurisdiction === 'UK' && LEAK.test(text)) {
+    if (mar && LEAK.test(text)) {
       risks.push({
-        regime: 'UK_MAR',
-        code: 'UK_MAR_LEAK',
+        regime: mar,
+        code: `${mar}_LEAK`,
         severity: 'medium',
         evidence: snippet(text, LEAK),
         explanation: 'A leak or rumour can mean confidentiality is lost, which removes the basis for delaying disclosure.',
         suggestedAction: 'Check whether a delay is still justified; if not, disclose as soon as possible.',
+      });
+    }
+    const declared = input.metadata.language;
+    const actual = languageOf(text);
+    if (input.jurisdiction === 'DK' && actual && declared && actual !== declared) {
+      risks.push({
+        regime: 'GENERAL',
+        code: 'DK_LANGUAGE_MISMATCH',
+        severity: 'low',
+        evidence: `metadata.language = ${String(declared)}; the text reads as ${actual === 'da' ? 'Danish' : 'English'}`,
+        explanation: 'The language declared for the announcement does not match the language of the text, so the wrong statements may be attached on release.',
+        suggestedAction: 'Fix the language field or the text before submitting.',
       });
     }
     if (input.jurisdiction === 'US' && SELECTIVE.test(text)) {

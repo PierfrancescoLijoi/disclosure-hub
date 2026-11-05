@@ -18,7 +18,7 @@ export const PreCheckReportSchema = z.object({
   missingInformation: z.array(z.object({ field: z.string(), why: z.string() })),
   risks: z.array(
     z.object({
-      regime: z.enum(['UK_MAR', 'US_REG_FD', 'GENERAL']),
+      regime: z.enum(['UK_MAR', 'EU_MAR', 'US_REG_FD', 'GENERAL']),
       code: z.string(),
       severity: z.enum(['low', 'medium', 'high']),
       evidence: z.string(),

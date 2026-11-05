@@ -32,7 +32,7 @@ abstract class MockGateway implements PublishGateway {
 
   /** Receipt rules of the external system; throws a permanent GatewayError on rejection. */
   protected abstract check(payload: DistributionPayload): void;
-  protected abstract receipt(payload: DistributionPayload, seq: number, now: Date): Omit<PublishAck, 'acceptedAt'>;
+  protected abstract receipt(payload: DistributionPayload, seq: number, now: Date): Omit<PublishAck, 'acceptedAt'> | Promise<Omit<PublishAck, 'acceptedAt'>>;
 
   async find(idempotencyKey: string): Promise<PublishAck | null> {
     const r = await this.db
@@ -84,7 +84,7 @@ abstract class MockGateway implements PublishGateway {
         .orderBy('seq', 'desc')
         .limit(1)
         .executeTakeFirst();
-      const r = this.receipt(payload, (last?.seq ?? 0) + 1, now);
+      const r = await this.receipt(payload, (last?.seq ?? 0) + 1, now);
       try {
         await this.db
           .insertInto('ext_receipts')
@@ -180,7 +180,11 @@ export class MockEdgarGateway extends MockGateway {
   }
 }
 
-/** Nasdaq Copenhagen company announcements. The number is per channel here; the real one is per issuer and year. */
+/**
+ * Nasdaq Copenhagen company announcements. The exchange numbers them per issuer and year ("12/2026"), so the number
+ * is the count of that issuer's earlier releases in the year plus one. It is read inside the sequence-collision loop
+ * of `record`, so two concurrent releases of one issuer cannot both take the same number.
+ */
 export class MockNasdaqCphGateway extends MockGateway {
   constructor(db: Kysely<DB>, clock: Clock) {
     super(db, clock, 'cph');
@@ -188,20 +192,50 @@ export class MockNasdaqCphGateway extends MockGateway {
 
   protected check(p: DistributionPayload): void {
     const a = p.attributes;
-    if (!isValidCvr(String(a.cvr)) || !isValidLei(String(a.lei))) {
-      throw new GatewayError('permanent', 'CPH_REJECTED', 'Nasdaq Copenhagen requires a valid CVR number and LEI');
+    if (!isValidCvr(String(a.cvr)) || !isValidLei(String(a.lei)) || !a.ticker) {
+      throw new GatewayError('permanent', 'CPH_REJECTED', 'Nasdaq Copenhagen requires a valid CVR number, LEI and ticker');
     }
     if (a.language !== 'da' && a.language !== 'en') {
       throw new GatewayError('permanent', 'CPH_REJECTED', 'Company announcements must be in Danish or English');
     }
+    if (a.market !== 'main' && a.market !== 'first_north') {
+      throw new GatewayError('permanent', 'CPH_REJECTED', 'The issuer must be listed on the main market or on First North');
+    }
+    if (a.category === 'major_shareholding' && a.market === 'first_north') {
+      throw new GatewayError('permanent', 'CPH_REJECTED', 'Major-shareholder announcements are for regulated-market issuers');
+    }
+    if ((a.insideInformation === 'true') !== (a.category === 'inside_information')) {
+      throw new GatewayError('permanent', 'CPH_REJECTED', 'The inside-information flag must match the announcement type');
+    }
     if (!p.content.trim()) throw new GatewayError('permanent', 'CPH_REJECTED', 'Empty announcement');
   }
 
-  protected receipt(p: DistributionPayload, seq: number, now: Date): Omit<PublishAck, 'acceptedAt'> {
-    const number = `${seq}/${now.getUTCFullYear()}`;
+  protected async receipt(p: DistributionPayload, _seq: number, now: Date): Promise<Omit<PublishAck, 'acceptedAt'>> {
+    const year = now.getUTCFullYear();
+    // `check` has already proved the CVR is eight digits, so it is safe inside a LIKE pattern.
+    const { n } = await this.db
+      .selectFrom('ext_receipts')
+      .select((eb) => eb.fn.countAll<number>().as('n'))
+      .where('channel', '=', this.channel)
+      .where('accepted_at', '>=', `${year}-01-01`)
+      .where('accepted_at', '<', `${year + 1}-01-01`)
+      .where('detail', 'like', `%"cvr":"${String(p.attributes.cvr)}"%`)
+      .executeTakeFirstOrThrow();
+    const mine = Number(n);
+    const number = `${mine + 1}/${year}`;
     return {
       externalRef: number,
-      detail: { service: 'Nasdaq Copenhagen', companyAnnouncementNumber: number, cvr: p.attributes.cvr, language: p.attributes.language, oam: 'Finanstilsynet', headline: p.headline },
+      detail: {
+        service: 'Nasdaq Copenhagen',
+        companyAnnouncementNumber: number,
+        cvr: p.attributes.cvr,
+        language: p.attributes.language,
+        market: p.attributes.market,
+        category: p.attributes.category,
+        insideInformation: p.attributes.insideInformation === 'true',
+        oam: 'Finanstilsynet',
+        headline: p.headline,
+      },
     };
   }
 }

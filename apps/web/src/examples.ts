@@ -6,6 +6,7 @@ interface Example {
 }
 
 const day = (back: number) => new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 const CONTACT = '\n\nEnquiries: Investor Relations, ir@northwind.example, +44 20 7946 0000.';
 
@@ -50,6 +51,27 @@ export const EXAMPLES: Record<string, () => Example> = {
       language: 'en', pdmrName: 'Dan Okafor', position: 'Chief Financial Officer', instrument: 'Ordinary shares', isin: 'DK0010244425',
       transactionType: 'acquisition', price: 120, currency: 'DKK', volume: 2000, transactionDate: day(1), venue: 'XCSE', notifiedAt: day(1),
     },
+  }),
+  'DK.major_shareholding': () => ({
+    headline: 'Major shareholder announcement',
+    body: `Northwind Energy plc was notified that Fjord Capital A/S has passed the 5% threshold of voting rights in the Company.${CONTACT}`,
+    metadata: {
+      language: 'en', holder: { name: 'Fjord Capital A/S', type: 'legal_entity' }, threshold: '5%', direction: 'up', basis: 'voting_rights',
+      holdingKind: 'shares', holdingPercent: 5.4, crossedOn: day(2), notifiedOn: day(1),
+    },
+  }),
+  'DK.share_buyback': () => ({
+    headline: 'Share buyback programme: transactions in week 45',
+    body: `Northwind Energy plc has bought own shares under the programme announced on 2 February 2026, as set out below.${CONTACT}`,
+    metadata: {
+      language: 'en', programme: 'Share buyback 2026', periodFrom: day(4), periodTo: day(1), sharesBought: 12000, averagePrice: 118.4,
+      currency: 'DKK', cumulativeShares: 96000, authorisedMaximum: 500000,
+    },
+  }),
+  'DK.general_meeting': () => ({
+    headline: 'Notice of annual general meeting',
+    body: `The Board of Directors of Northwind Energy plc convenes the annual general meeting. The notice, the agenda and the proxy form are available on the Company's website.${CONTACT}`,
+    metadata: { language: 'en', meetingType: 'annual', meetingDate: inDays(28), venue: 'Copenhagen, Bella Center' },
   }),
   'US.form_8k': () => ({
     headline: 'Northwind Energy reports third quarter 2026 results',

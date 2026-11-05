@@ -8,11 +8,11 @@ Return ONLY one JSON object, no prose, with exactly this shape:
 {
   "classification": { "suggestedCategory": <one of input.categories>, "confidence": <0..1>, "rationale": string },
   "missingInformation": [ { "field": string, "why": string } ],
-  "risks": [ { "regime": "UK_MAR" | "US_REG_FD" | "GENERAL", "code": string, "severity": "low" | "medium" | "high", "evidence": <short quote from the text>, "explanation": string, "suggestedAction": string } ],
+  "risks": [ { "regime": "UK_MAR" | "EU_MAR" | "US_REG_FD" | "GENERAL", "code": string, "severity": "low" | "medium" | "high", "evidence": <short quote from the text>, "explanation": string, "suggestedAction": string } ],
   "humanReviewRequired": true,
   "disclaimer": "Advisory output to support human review. It is not legal advice and never approves or blocks a release."
 }
-Flag possible UK MAR issues (inside information, delay of disclosure, leaks) when input.jurisdiction is UK and possible US Regulation FD issues (selective disclosure, prompt-disclosure duty) when it is US. Quote evidence verbatim; if there is none, say so in "evidence".`;
+Flag possible UK MAR issues (inside information, delay of disclosure, leaks) when input.jurisdiction is UK, the same issues under EU MAR when it is DK (Denmark; the announcement may be in Danish or English and must match metadata.language), and possible US Regulation FD issues (selective disclosure, prompt-disclosure duty) when it is US. Quote evidence verbatim; if there is none, say so in "evidence".`;
 
 /** Optional real provider. Output is validated by the service, so a bad answer is discarded, not trusted. */
 export class AnthropicPreCheckProvider implements PreCheckProvider {
