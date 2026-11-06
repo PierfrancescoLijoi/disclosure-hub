@@ -39,13 +39,13 @@ console.log(ready ? ' ready.\n' : ` not answering after ${WAIT_SECONDS}s. Check:
 console.log(`Open these in your browser:
 
   ${APP}
-      THE APP. Sign in with Keycloak, password for every user: hub-dev-only
-        alice  author      create, fill, validate, submit for review
-        bob    secretary   approve
-        carol  counsel     approve
-        dan    CFO         approve
-        erin   publisher   publish
-      Sign out and in again at each step.
+      THE APP. Sign in with Keycloak. Sign out and in again at each step.
+        username   password       role        what to do
+        alice      hub-dev-only   author      create, fill, validate, submit for review
+        bob        hub-dev-only   secretary   approve
+        carol      hub-dev-only   counsel     approve
+        dan        hub-dev-only   CFO         approve
+        erin       hub-dev-only   publisher   publish
 
   ${APP}/public/announcements
       WHAT READERS SEE. Published announcements, no sign-in. Follow one to get e-mail.
