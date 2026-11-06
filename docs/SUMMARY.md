@@ -28,6 +28,22 @@ A **modular monolith with hexagonal boundaries** in TypeScript. One codebase and
 Diagrams: [use cases](diagrams/01-use-cases.drawio.png), [Azure](diagrams/02-azure-architecture.drawio.png),
 [local](diagrams/03-local-architecture.drawio.png), [local scaling](diagrams/04-local-scaling.drawio.png).
 
+**Containers, why each is separate, and what each scales on.** The split follows how each part waits and fails, not the code layout:
+a process that waits on a slow vendor, a mail server or a model must not slow the one that answers people.
+
+| Container | What is in it | Why it is separate | Scales on | One copy handles |
+|---|---|---|---|---|
+| `api` | REST, public reads, token check | It must never wait on a newswire | People and readers (requests) | About 80 write requests/s on 0.5 vCPU |
+| `worker` | Files to the newswire, retries, lease | It waits on the vendor and may fail; a slow or down newswire must not slow the API | Publications per second | 2 in flight / vendor latency: 10/s at 200 ms (9 measured). Up to 6 copies |
+| `notifier` (`ROLE=events`) | Reader e-mails and webhooks, drained from the outbox | A slow mail server must never delay a publication | Followers per announcement | About 275 followers/s |
+| `agents` (`ROLE=events`) | The AI pre-check, advisory only | A slow or costly model must not slow publishing or e-mails; a new agent is one more process | Submissions (one model call each) | Set by the model, not the CPU |
+| `migrate` | The schema, run once before `api` and `worker` start | One owner for the schema, with its own rights | Does not scale | Runs once |
+| `postgres` | Data, job queue, event outbox, audit chain | One database so a step, its audit entry and its event commit in one transaction | Does not scale out here | The shared limit: 1 vCPU, and `(api + workers + events) x 5` connections under 100 |
+| `web`, `keycloak`, `mailpit` | The app and edge limit; sign-in; an SMTP sink | Stand-ins for Front Door, Entra ID and Communication Services Email | Do not scale | Azure replaces them |
+
+Measured on one laptop with Azure-sized limits: 1 worker 9 published/s, 3 workers 16/s (the API is the limit), 2 APIs about 20/s
+(PostgreSQL is the limit). The expected peak is 0.17/s. Commands and detail: [Scale it locally](../README.md#scale-it-locally).
+
 ## What is shared and what differs (UK, US, Denmark)
 
 | Layer | Written once, used by all three | Shared by UK and Denmark only | Written per jurisdiction |
