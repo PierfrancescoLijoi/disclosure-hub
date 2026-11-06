@@ -8,7 +8,10 @@ const WAIT_SECONDS = 180;
 const verbose = process.argv.includes('--verbose');
 
 if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
-  console.error('Docker is not running. Start Docker Desktop, wait until it says it is running, then run this again.');
+  console.error(
+    'Docker is not available. Install Docker Desktop if you do not have it (https://www.docker.com/products/docker-desktop/),\n' +
+      'or start it and wait until it says it is running, then run this again.',
+  );
   process.exit(1);
 }
 

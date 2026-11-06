@@ -4,8 +4,9 @@
 #
 #   bootstrap.cmd              double-click it, or run it from a terminal
 #   bootstrap.cmd -NoStart     prepare everything, do not start
+#   bootstrap.cmd -Stack       prepare everything, then start the container stack (Docker Desktop) and print the addresses (what stack.cmd does)
 #   bootstrap.cmd -Demo        with the app running in another window: publish one announcement in each jurisdiction (UK, US, Denmark) through the API
-param([switch]$NoStart, [switch]$Demo)
+param([switch]$NoStart, [switch]$Demo, [switch]$Stack)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # progress bars make Invoke-WebRequest very slow in Windows PowerShell
@@ -58,10 +59,11 @@ try {
   }
 
   Step "2/3 Installing the dependencies (a minute or two the first time)"
-  & npm.cmd install --no-audit --no-fund
+  & npm.cmd install --no-audit --no-fund --loglevel=error
   if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit $LASTEXITCODE). Read the lines above." }
 
   Step "3/3 Ready"
+  if ($Stack) { & node (Join-Path $Root 'scripts\stack.mjs'); exit $LASTEXITCODE }
   if ($Demo) { & npm.cmd run demo; exit $LASTEXITCODE }
   if ($NoStart) { Write-Host "Setup done. Start it later with bootstrap.cmd."; exit 0 }
   Write-Host "Starting. Open http://localhost:3000 in your browser. Stop with Ctrl+C."
