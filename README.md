@@ -269,6 +269,20 @@ The container stack (Mode 2) is the way to see scaling on one machine. Every pro
 each part scales on its own; [the diagram](docs/diagrams/04-local-scaling.drawio.png) shows it on one page. Resource limits match the Azure
 replicas, so the numbers below are the ones the sizing document is built on. All of it was run on 6 Nov (Docker Desktop, one laptop).
 
+The split follows how each part waits and fails, not the code layout: a process that waits on a slow vendor, a mail server or a model must not
+slow the one that answers people.
+
+| Container | What is in it | Why it is separate |
+|---|---|---|
+| `api` | REST, public reads, token check | Load grows with people and readers, so it scales on its own and never waits on a newswire |
+| `worker` | Files to the newswire, retries, lease | It spends its time waiting on the vendor and may fail; a slow or down newswire must not slow the API. Load grows with publications |
+| `notifier` (`ROLE=events`) | Reader e-mails and webhooks, drained from the outbox | A slow mail server must never delay a publication, so it has its own process and its own failures |
+| `agents` (`ROLE=events`) | The AI pre-check, advisory only | An expensive or slow model must not slow publishing or e-mails, and a new agent is one more process with no change elsewhere |
+| `migrate` | The schema, run once before `api` and `worker` start | One owner for the schema, with its own rights (on Azure the runtime identity cannot alter tables) |
+| `postgres` | Data, job queue, event outbox, audit chain | One database so a step, its audit entry and its event commit in one transaction; this is also the shared limit |
+| `web` | The app, a cache for public reads, an edge rate limit | Stands in for Front Door on Azure |
+| `keycloak`, `mailpit` | Sign-in; an SMTP sink with an inbox page | Stand-ins for Entra ID and Communication Services Email |
+
 | Container | Scales? | How | What happened when run |
 |---|---|---|---|
 | `worker` (files to the newswire) | Yes, horizontally | `docker compose up -d --scale worker=3` | 1 worker 9 published/s, 3 workers 16/s, no duplicates. Past 6 workers every one is woken by every `NOTIFY`: move the queue to Service Bus or Redis |
