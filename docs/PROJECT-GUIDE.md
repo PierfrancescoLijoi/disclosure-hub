@@ -367,7 +367,7 @@ for each person (run `npm install` once on the host first).
 | Full start | `bootstrap.cmd` or `sh bootstrap.sh` |
 | Prepare only | `bootstrap.cmd -NoStart` / `sh bootstrap.sh --no-start` |
 | Demo through the API | `npm run demo` (or `bootstrap.cmd -Demo`) |
-| Tests | `npm test` (223 server plus 12 web), `npm run typecheck` |
+| Tests | `npm test` (224 server plus 12 web), `npm run typecheck` |
 | Benchmark | `npm run bench`, `npm run bench:readers -w apps/server` |
 | Start from scratch | delete `apps/server/data/` |
 | Another port | `PORT=3001 npm start` (PowerShell: `$env:PORT=3001; npm start`) |
@@ -451,7 +451,8 @@ The seams for splitting later already exist: queue, worker role, database adapte
 
 ### The numbers (laptop under Azure resource limits; a method and a trend, not a capacity promise)
 
-- 1 worker: 9 publications per second; 3 workers: 27. About 90% of the ceiling set by a 200 ms gateway. Over 900 publications: 900
+- Under the Azure-sized limits: 1 worker 9 publications per second, 3 workers 16 (the API is the limit, about 80 write requests per
+  second), a second API replica about 20 (PostgreSQL reaches its 1 vCPU limit). Over 900 earlier publications: 900
   confirmed, 900 distinct external references, **0 duplicates, 0 failed attempts**.
 - With real OIDC and the PostgreSQL queue under Azure limits: about 15 publications per second with 2 workers, p95 of 0.57 s for
   the 5-call draft→published sequence, 16 database connections. The sizing peak is 0.17/s (100 publications in 10 minutes): about
@@ -573,7 +574,7 @@ Cut in this order to protect the complete flow, the quality of the tests and the
 |---|---|
 | Draft→published in the UK, US and Denmark, from the UI, the REST demo and the tests | **Verified by running it** |
 | Retries, exhaustion, permanent rejection, lost acknowledgement, lease takeover after a crash, recovery of a lost wake-up | **Verified** (tests) |
-| 223 tests on SQLite; 7 gated integration tests run in CI with PostgreSQL 16 + Redis 7, including two worker processes with no double release | **Verified locally except the gated adapter tests; CI verifies the full 226** |
+| 224 tests on SQLite; 7 gated integration tests run in CI with PostgreSQL 16 + Redis 7, including two worker processes with no double release | **Verified locally except the gated adapter tests; CI verifies the full 226** |
 | OIDC with Keycloak, Authorization Code + PKCE from a real browser | **Verified** |
 | Compose twin: separate api, worker, notifier, agents; mail delivered to Mailpit; nginx cache | **Verified** |
 | Bootstrap from scratch on Windows and Linux (Node 22.12/22.23.4/24, refusal of Node 18/20, Docker from a fresh clone) | **Verified**; macOS, Docker on a Linux host and a truly clean Windows **not** tried |

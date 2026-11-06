@@ -132,14 +132,15 @@ What exists and was checked:
 - **Worker autoscaling is a safety net, not the capacity.** The Azure worker rule scales on CPU, and a worker waiting on a slow vendor is idle, so CPU does not see a publishing backlog. Capacity is the floor (2 workers, about 15 publications a second measured, against a peak of 0.17), and the backlog is watched by an alert on the age of the oldest due publication (the worker logs it every minute). A backlog-driven scaler is not wired because the database is Entra-only (no password for a KEDA `postgresql` scaler) and `/metrics` sits behind the edge check; it arrives with Service Bus (KEDA `azure-servicebus`, managed identity) at the ADR 0001 triggers.
 - **Hot paths are indexed row lookups.** The one scan, the sweeper, reads overdue publications in batches of 100.
 
-**Measured** (`npm run bench`, Compose stack on one laptop under Docker Desktop, REST only, 300 announcements, 20 in flight, mock newswire answering in 200 ms, per-worker gateway concurrency 2):
+**Measured** (`npm run bench`, Compose stack on one laptop under Docker Desktop with the Azure-sized resource limits, REST only, 300 announcements, 20 in flight, mock newswire answering in 200 ms, per-worker gateway concurrency 2; re-run on 6 Nov):
 
-| Workers | Published per second | Theoretical ceiling (2 / 0.2 s per worker) |
+| Stack | Published per second | What limits it |
 |---|---|---|
-| 1 | 9 | 10 |
-| 3 | 27 | 30 |
+| 1 api, 1 worker | 9 | The worker: 2 in flight / 0.2 s = 10 per second |
+| 1 api, 3 workers | 16 | The API: 16 announcements x 5 calls = about 80 write requests per second on 0.5 vCPU |
+| 2 api, 3 workers (one benchmark per replica) | about 20 | PostgreSQL at about 100 % of its 1 vCPU limit |
 
-Throughput scales linearly with workers and sits at about 90% of the ceiling set by the vendor call. Across both runs plus a first one (900 publications): 900 acknowledged, 900 distinct external references, 0 failed attempts, so no duplicate releases under concurrency. The API accepted about 55 to 60 full draft-to-publish-request sequences per second (5 calls each, p95 under 0.6 s) on a single API process.
+Throughput follows the workers until the API is the limit, then the API, then the single database, in that order. Also run on 6 Nov: two `notifier` and two `agents` replicas drained 1,490 deliveries under load with none dead and one report per revision, and with two API replicas up, stopping one left the site answering within 8 s (nginx re-resolves the name every 5 s). An earlier run, before the resource limits were added to the Compose file, reached 27 per second with 3 workers; under the Azure-sized limits that number no longer holds. The re-run also found a real race, fixed and covered by `audit-concurrency.test.ts`: a person approving and the pre-check agent reporting both wanted the next slot in the same announcement's audit chain, and the person's request could fail with a 409; a transaction that loses that race is now re-run. Across both earlier runs plus a first one (900 publications): 900 acknowledged, 900 distinct external references, 0 failed attempts, so no duplicate releases under concurrency. The API accepted about 55 to 60 full draft-to-publish-request sequences per second (5 calls each, p95 under 0.6 s) on a single API process.
 
 The benchmark found a real artefact on its first run: the mock newswire allocated release numbers with an optimistic max+1 insert, so concurrent submissions collided and were retried by the platform with 2 s backoff, capping the rate near 7 per second. The platform handled it correctly (no duplicates); the mock was changed to retry the number allocation itself, as a real wire would.
 
@@ -194,7 +195,7 @@ Verified by running it:
 
 - Draft to published in UK, US and Denmark through the UI, the REST demo and the tests.
 - Retry with backoff, exhaustion and manual retry, permanent rejection, lost acknowledgement (reconciled), lease takeover after a crash, lost wake-up recovery by the sweeper.
-- The local SQLite run has 223 passing tests and 7 gated integration tests; CI supplies PostgreSQL 16 and Redis 7 and runs all 230, including the two-worker tests. There are also 12 UI logic tests. The screens are described in docs/UI.md.
+- The local SQLite run has 224 passing tests and 7 gated integration tests; CI supplies PostgreSQL 16 and Redis 7 and runs all 231, including the two-worker tests. There are also 12 UI logic tests. The screens are described in docs/UI.md.
 - Real authentication: tokens verified against a JWKS (valid, expired, wrong audience or issuer, forged, unknown role, provider down), and sign-in with Authorization Code + PKCE through a real browser against Keycloak.
 - The PostgreSQL queue on a real database, with two workers and after the listener connection is cut.
 - The Compose twin (Keycloak, PostgreSQL queue, migrate job, 2 workers) with the demo and a benchmark using real tokens.

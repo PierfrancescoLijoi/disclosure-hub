@@ -266,17 +266,29 @@ AUTH=oidc npm run demo                    # the Compose stack, with a real beare
 ## Scale it locally
 
 The container stack (Mode 2) is the way to see scaling on one machine. Every process is the same image started with a different `ROLE`, so
-each part scales on its own; [the diagram](docs/diagrams/04-local-scaling.drawio.png) shows it on one page.
+each part scales on its own; [the diagram](docs/diagrams/04-local-scaling.drawio.png) shows it on one page. Resource limits match the Azure
+replicas, so the numbers below are the ones the sizing document is built on. All of it was run on 6 Nov (Docker Desktop, one laptop).
 
-| Container | Scales? | How | Limit | Status |
-|---|---|---|---|---|
-| `worker` (files to the newswire) | Yes, horizontally | `docker compose up -d --scale worker=3` | 6 workers: every worker is woken by every `NOTIFY`; past that, move the queue to Service Bus or Redis | **Run and measured:** 1 worker 9 publications/s, 3 workers 27/s, no duplicates (200 ms newswire) |
-| `api` | Stateless, so yes by design | Remove the fixed `ports` line of `api` in `docker-compose.yml`, then `--scale api=2` (`web` reaches it as `api:3000`) | The shared database; about 80 write requests/s per 0.5 vCPU | **Not run as replicas** |
-| `notifier`, `agents` (`ROLE=events`) | Yes: each delivery is claimed with a lease, so a second copy cannot double-send | `docker compose up -d --scale notifier=2` | Total of 6 event replicas; the outbox is polled every second | **Benchmark only** (outbox claim 110/s with 1 claimer, 180/s with 4), not run as replicas |
-| `postgres`, `web`, `keycloak`, `mailpit` | No, single instance on purpose | | `postgres` is the shared limit: every process holds a pool of 5 connections, so `(api + workers + events) x 5` must stay under `max_connections` (100). Three workers: 6 processes, at most 30 connections | Azure replaces them with managed services |
-| `migrate` | Runs once | | | |
+| Container | Scales? | How | What happened when run |
+|---|---|---|---|
+| `worker` (files to the newswire) | Yes, horizontally | `docker compose up -d --scale worker=3` | 1 worker 9 published/s, 3 workers 16/s, no duplicates. Past 6 workers every one is woken by every `NOTIFY`: move the queue to Service Bus or Redis |
+| `api` | Yes, it is stateless | `API_HOST_PORTS=127.0.0.1:3000-3005 docker compose up -d --scale api=2` (each replica gets its own host port; `web` on :8080 balances them and re-resolves every 5 s) | 2 replicas with 3 workers: about 20 published/s. Stopping one replica: `web` kept answering within 8 s |
+| `notifier`, `agents` (`ROLE=events`) | Yes, each delivery is claimed with a lease | `docker compose up -d --scale notifier=2 --scale agents=2` | Under load: 1,490 deliveries done, none dead, one report per announcement revision |
+| `postgres`, `web`, `keycloak`, `mailpit` | No, single instance on purpose | | `postgres` is the shared limit (see below). Azure replaces all four with managed services |
+| `migrate` | Runs once | | |
 
-Show worker scaling in four steps (the stack needs `RATE_LIMIT_PER_MIN=0`, or the per-person limit throttles the benchmark):
+What limits throughput, in the order you meet it (300 announcements, 20 in flight, 200 ms mock newswire):
+
+| Stack | Published per second | The limit |
+|---|---|---|
+| 1 api, 1 worker | 9 | The worker: 2 in flight / 0.2 s = 10 per second |
+| 1 api, 3 workers | 16 | The API: 16 announcements x 5 calls = about 80 write requests per second on 0.5 vCPU |
+| 2 api, 3 workers | about 20 | PostgreSQL, at about 100 % of its 1 vCPU. Next step: a bigger database or the exits in [ADR 0001](docs/adr/0001-database-bottleneck-and-service-bus.md) |
+
+Every process holds a pool of 5 connections, so `(api + workers + events) x 5` must stay under `max_connections` (100). The expected peak is
+0.17 per second, so even one worker has about 50 times the margin: the point of scaling here is to show the mechanism and where it stops.
+
+Show it in four steps (the stack needs `RATE_LIMIT_PER_MIN=0`, or the per-person limit throttles the benchmark):
 
 ```bash
 RATE_LIMIT_PER_MIN=0 docker compose up --build -d --scale worker=1
@@ -285,10 +297,18 @@ RATE_LIMIT_PER_MIN=0 docker compose up -d --scale worker=3
 AUTH=oidc GATEWAY_LATENCY_MS=200 npm run bench
 ```
 
-The first run prints about 9 published per second, the second about 27, with no duplicates. Watch it while it runs: `docker stats` for CPU per
-replica and `GET /metrics` for the age of the oldest publication waiting. One worker already has about 50 times the margin over the expected peak
-(0.17/s), so the point of scaling here is to show the mechanism, not to need it. The Azure numbers (2 workers about 15/s under Azure limits) are
-in [docs/SIZING.md](docs/SIZING.md); Azure itself was never applied.
+The first run prints about 9 published per second (the worker is the limit), the second about 16 (now the API is). To go past that, add API
+replicas, then run one benchmark per replica, because the edge in front of `web` limits each address to 100 requests per second:
+
+```bash
+API_HOST_PORTS=127.0.0.1:3000-3005 RATE_LIMIT_PER_MIN=0 docker compose up -d --scale worker=3 --scale api=2
+docker compose ps api        # note the two host ports
+BASE_URL=http://localhost:<port> AUTH=oidc GATEWAY_LATENCY_MS=200 N=150 CONCURRENCY=10 npm run bench      # in two terminals, one per port
+```
+
+Keep the same variables on every `docker compose up`, or Compose recreates the container. Watch it while it runs: `docker stats` for CPU per
+replica (the database reaches its limit first) and `GET /metrics` for the age of the oldest publication waiting. The Azure numbers (2 workers
+about 15/s under Azure limits) are in [docs/SIZING.md](docs/SIZING.md); Azure itself was never applied.
 
 ## Throughput check
 
@@ -308,7 +328,7 @@ and run `AUTH=oidc GATEWAY_LATENCY_MS=200 N=200 CONCURRENCY=5 npm run bench`. Re
 ## Tests
 
 ```bash
-npm test               # 223 server tests pass (7 integration tests skipped without PostgreSQL/Redis), then 12 web tests
+npm test               # 224 server tests pass (7 integration tests skipped without PostgreSQL/Redis), then 12 web tests
 npm test -w apps/web   # run only the 12 UI logic tests (diff, attention queue, readiness)
 npm run typecheck
 ```
@@ -321,7 +341,7 @@ docker run -d --name hub-test-redis -p 56379:6379 redis:7-alpine
 
 TEST_PG_URL=postgres://hub:hub-dev-only@localhost:55432/hub_test \
 TEST_REDIS_URL=redis://localhost:56379 \
-npm test -w apps/server -- --no-file-parallelism     # all 230 server tests; CI runs this with PostgreSQL 16 + Redis 7
+npm test -w apps/server -- --no-file-parallelism     # all 231 server tests; CI runs this with PostgreSQL 16 + Redis 7
 ```
 
 With `TEST_PG_URL` every integration test runs on PostgreSQL (the schema is dropped and recreated per

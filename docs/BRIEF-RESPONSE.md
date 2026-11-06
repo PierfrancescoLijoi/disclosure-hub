@@ -46,7 +46,7 @@ Without a browser: `npm run demo` drives one announcement per jurisdiction throu
 the mail service locally, and the AI provider by default. Sign-in is real OIDC in the container setup and in the Azure
 design. Nothing is submitted to a regulator.
 
-**Evidence that it works:** 223 server tests pass on SQLite; 7 more are gated integration tests that CI runs with PostgreSQL 16 and Redis 7;
+**Evidence that it works:** 224 server tests pass on SQLite; 7 more are gated integration tests that CI runs with PostgreSQL 16 and Redis 7;
 12 UI logic tests pass. The workflow tests run the full path in all three jurisdictions; the container stack was
 run end to end with the demo and a benchmark. See [ARCHITECTURE.md §6](ARCHITECTURE.md#6-verified-and-only-designed).
 
@@ -74,8 +74,9 @@ run end to end with the demo and a benchmark. See [ARCHITECTURE.md §6](ARCHITEC
 
 ### Numbers (measured on a laptop under the Azure-sized resource limits; a method and a trend, not a capacity promise)
 
-- Workers scale linearly: 1 worker 9 publications a second, 3 workers 27, about 90 % of the ceiling set by a 200 ms
-  gateway. 900 publications, 900 distinct external references, **0 duplicates, 0 failed attempts**.
+- Workers scale until the API is the limit: with the Azure-sized limits 1 worker 9 publications a second, 3 workers 16
+  (the 0.5 vCPU API, about 80 write requests a second), a second API replica about 20, where PostgreSQL reaches its
+  1 vCPU limit; a 200 ms gateway. 900 earlier publications, 900 distinct external references, **0 duplicates, 0 failed attempts**.
 - With real OIDC and the PostgreSQL queue under the Azure-sized limits: about 15 publications a second with 2 workers, p95
   of a five-call draft-to-publish sequence 0.57 s, 16 database connections; the sizing peak is 0.17 a second (about 90x
   headroom).
