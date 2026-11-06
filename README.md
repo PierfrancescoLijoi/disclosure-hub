@@ -239,8 +239,20 @@ docker compose up --build --scale worker=2
 ```
 
 The browser signs in with Authorization Code + PKCE and the API verifies the signed token (issuer, audience, signature,
-expiry); roles come from the token. Users `alice`, `bob`, `carol`, `dan`, `erin` with the password `hub-dev-only`
-(a local value, in `deploy/keycloak/realm-hub.json`). Keycloak's admin console is on <http://localhost:8081>.
+expiry); roles come from the token. Keycloak's admin console is on <http://localhost:8081>.
+
+**Sign-in for Mode 2.** Every user has the same password, `hub-dev-only` (a local demo value, in `deploy/keycloak/realm-hub.json`).
+A full announcement needs five people, so sign out and in again at each step:
+
+| User | Password | Role | Step in the journey |
+|---|---|---|---|
+| `alice` | `hub-dev-only` | author | Create, fill, validate, submit for review |
+| `bob` | `hub-dev-only` | company secretary | Approve |
+| `carol` | `hub-dev-only` | general counsel | Approve |
+| `dan` | `hub-dev-only` | CFO | Approve |
+| `erin` | `hub-dev-only` | publisher | Publish |
+
+In `npm start` (Mode 1) there is no password: pick a persona on the sign-in page.
 
 Modes 1 and 2 run **the same business logic, API, rules and state machine**. Only the adapters differ (database,
 queue, identity, process split). `docker compose down -v` removes the data. The previous Redis/BullMQ topology is still
