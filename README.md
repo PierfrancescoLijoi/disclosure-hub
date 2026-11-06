@@ -30,6 +30,24 @@ through *Validate*, *Submit for review*, three approvals (bob, carol, dan) and *
 [Try it](#try-it). Without a browser: `npm run demo` (with the app running) publishes one announcement per jurisdiction.
 No Node.js yet? Use the bootstrap below, which installs nothing system-wide.
 
+**Windows PowerShell says "running scripts is disabled" (`npm.ps1` cannot be loaded)?** It is PowerShell's execution policy, not the
+project. Either call the `.cmd` version:
+
+```powershell
+npm.cmd install
+npm.cmd start
+```
+
+or relax the policy for this window only (it resets when you close the terminal), then use `npm` as usual:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+npm install
+npm start
+```
+
+Command Prompt and Git Bash have no such restriction.
+
 **Reading order (about 10 minutes):** [docs/SUMMARY.md](docs/SUMMARY.md) (architecture, decisions, trade-offs, next steps on
 one page), then [docs/BRIEF-RESPONSE.md](docs/BRIEF-RESPONSE.md) (each point of the brief with its proof). Everything else is
 under [Additional details](#additional-details).
