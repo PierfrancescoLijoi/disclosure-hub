@@ -106,7 +106,7 @@ services:
     environment:
       <<: *server-env
       ROLE: api
-    ports: ["127.0.0.1:3000:3000"]
+    ports: ["${API_HOST_PORTS:-127.0.0.1:3000}:3000"]   # one host port; for `--scale api=N` set API_HOST_PORTS=127.0.0.1:3000-3005 so each replica gets its own
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
