@@ -270,18 +270,18 @@ each part scales on its own; [the diagram](docs/diagrams/04-local-scaling.drawio
 replicas, so the numbers below are the ones the sizing document is built on. All of it was run on 6 Nov (Docker Desktop, one laptop).
 
 The split follows how each part waits and fails, not the code layout: a process that waits on a slow vendor, a mail server or a model must not
-slow the one that answers people.
+slow the one that answers people. Each container also scales on a different thing, which is why they scale separately.
 
-| Container | What is in it | Why it is separate |
-|---|---|---|
-| `api` | REST, public reads, token check | Load grows with people and readers, so it scales on its own and never waits on a newswire |
-| `worker` | Files to the newswire, retries, lease | It spends its time waiting on the vendor and may fail; a slow or down newswire must not slow the API. Load grows with publications |
-| `notifier` (`ROLE=events`) | Reader e-mails and webhooks, drained from the outbox | A slow mail server must never delay a publication, so it has its own process and its own failures |
-| `agents` (`ROLE=events`) | The AI pre-check, advisory only | An expensive or slow model must not slow publishing or e-mails, and a new agent is one more process with no change elsewhere |
-| `migrate` | The schema, run once before `api` and `worker` start | One owner for the schema, with its own rights (on Azure the runtime identity cannot alter tables) |
-| `postgres` | Data, job queue, event outbox, audit chain | One database so a step, its audit entry and its event commit in one transaction; this is also the shared limit |
-| `web` | The app, a cache for public reads, an edge rate limit | Stands in for Front Door on Azure |
-| `keycloak`, `mailpit` | Sign-in; an SMTP sink with an inbox page | Stand-ins for Entra ID and Communication Services Email |
+| Container | What is in it | Why it is separate | Scales on | One copy handles |
+|---|---|---|---|---|
+| `api` | REST, public reads, token check | It must never wait on a newswire | People and readers (requests) | About 80 write requests/s on 0.5 vCPU |
+| `worker` | Files to the newswire, retries, lease | It waits on the vendor and may fail; a slow or down newswire must not slow the API | Publications per second | 2 in flight / vendor latency: 10/s at 200 ms (9 measured). Up to 6 copies |
+| `notifier` (`ROLE=events`) | Reader e-mails and webhooks, drained from the outbox | A slow mail server must never delay a publication | Followers per announcement | About 275 followers/s |
+| `agents` (`ROLE=events`) | The AI pre-check, advisory only | A slow or costly model must not slow publishing or e-mails; a new agent is one more process | Submissions (one model call each) | Set by the model, not the CPU |
+| `migrate` | The schema, run once before `api` and `worker` start | One owner for the schema, with its own rights (on Azure the runtime identity cannot alter tables) | Does not scale | Runs once |
+| `postgres` | Data, job queue, event outbox, audit chain | One database so a step, its audit entry and its event commit in one transaction | Does not scale out here | The shared limit: 1 vCPU, and `(api + workers + events) x 5` connections under 100 |
+| `web` | The app, a cache for public reads, an edge rate limit | Stands in for Front Door on Azure | Does not scale here | Edge limit 100 requests/s per address |
+| `keycloak`, `mailpit` | Sign-in; an SMTP sink with an inbox page | Stand-ins for Entra ID and Communication Services Email | Do not scale | Azure replaces them |
 
 | Container | Scales? | How | What happened when run |
 |---|---|---|---|
