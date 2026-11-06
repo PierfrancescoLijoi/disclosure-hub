@@ -18,6 +18,8 @@
     "test": "npm test -w apps/server && npm test -w apps/web",
     "typecheck": "npm run typecheck -w apps/server && npm run typecheck -w apps/web",
     "demo": "npm run demo -w apps/server",
-    "bench": "npm run bench -w apps/server"
+    "bench": "npm run bench -w apps/server",
+    "stack": "node scripts/stack.mjs",
+    "stack:down": "docker compose down"
   }
 }

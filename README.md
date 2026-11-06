@@ -30,6 +30,16 @@ through *Validate*, *Submit for review*, three approvals (bob, carol, dan) and *
 [Try it](#try-it). Without a browser: `npm run demo` (with the app running) publishes one announcement per jurisdiction.
 No Node.js yet? Use the bootstrap below, which installs nothing system-wide.
 
+**Want the full experience** (real sign-in with Keycloak, PostgreSQL, separate worker, notifier and agents, a mail inbox)?
+With Docker Desktop running:
+
+```bash
+npm run stack
+```
+
+It builds and starts everything, waits until the app answers, then prints every address with what it is for (the table in
+[Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure)). `npm run stack:down` stops it.
+
 **Windows PowerShell says "running scripts is disabled" (`npm.ps1` cannot be loaded)?** It is PowerShell's execution policy, not the
 project. Either call the `.cmd` version:
 
@@ -223,8 +233,21 @@ You do not need Node for this mode. The first build takes about two minutes (it 
 for every role).
 
 ```bash
-docker compose up --build
+npm run stack          # builds, starts, waits until ready, prints the addresses below
+npm run stack:down     # stops everything (npm run stack:down -- -v also deletes the data)
 ```
+
+`npm run stack` is a thin wrapper over `docker compose up --build -d`, which on its own prints no addresses. Use the plain command if you
+prefer. Open these:
+
+| Address | What it is | How to use it |
+|---|---|---|
+| <http://localhost:8080> | **The app** | Sign in with Keycloak (users and password below) and take an announcement from draft to published |
+| <http://localhost:8080/public/announcements> | **What readers see** | No sign-in. Published announcements; follow one to receive its e-mail |
+| <http://localhost:8025> | **Mailpit**, the mail inbox | Every e-mail the system sends lands here: follow confirmations and announcement mail |
+| <http://localhost:8081> | **Keycloak admin** | The identity provider behind the sign-in. User `admin`, password `hub-dev-only` |
+
+Logs of one part: `docker compose logs -f api` (or `worker`, `notifier`, `agents`).
 
 Open <http://localhost:8080> and sign in (nginx serves the app and proxies `/api`; the API is also on :3000).
 Services: `postgres`, `keycloak` (identity provider, realm imported from `deploy/keycloak`), `migrate` (one-shot),
