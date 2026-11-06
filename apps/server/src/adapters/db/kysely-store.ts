@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Selectable } from 'kysely';
-import { conflict } from '../../domain/errors.js';
+import { conflict, DomainError } from '../../domain/errors.js';
 import { auditHash, GENESIS_HASH } from '../../domain/hash.js';
 import type {
   Actor,
@@ -646,7 +646,8 @@ function buildTx(db: Kysely<DB>): StoreTx {
             })
             .execute();
         } catch (err) {
-          if (isUniqueViolation(err)) throw conflict('CONCURRENT_UPDATE', 'Concurrent change detected while recording the audit trail');
+          // Two writers read the same last entry (a person and an advisory agent, say): the loser retries in `runTx`.
+          if (isUniqueViolation(err)) throw conflict(AUDIT_SEQ_CONFLICT, 'Concurrent change detected while recording the audit trail');
           throw err;
         }
         return event;
@@ -736,10 +737,32 @@ const toAiReport = (r: Row<'ai_reports'>): AiReportRecord => ({
 const toActor = (r: Row<'users'>): Actor => ({ id: r.id, name: r.name, issuerId: r.issuer_id, roles: json(r.roles) });
 const toIssuer = (r: Row<'issuers'>): Issuer => ({ id: r.id, name: r.name, profiles: json(r.profiles) });
 
+const AUDIT_SEQ_CONFLICT = 'AUDIT_SEQ_CONFLICT';
+const AUDIT_RETRIES = 8;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Runs a transaction, and re-runs it when it lost a race for the next audit sequence number. The audit chain of one
+ * announcement is linear, and a person's step and an agent's report can both want the next slot; the loser has rolled
+ * back, so running it again re-reads the state and either succeeds or fails on its own merits (a real conflict, such
+ * as a changed version, is a different error and is never retried).
+ */
+async function runTx<T>(db: Kysely<DB>, fn: (tx: StoreTx) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await db.transaction().execute((trx) => fn(buildTx(trx)));
+    } catch (err) {
+      if (!(err instanceof DomainError) || err.code !== AUDIT_SEQ_CONFLICT) throw err;
+      if (attempt >= AUDIT_RETRIES) throw conflict('CONCURRENT_UPDATE', 'Concurrent change detected while recording the audit trail');
+      await sleep(attempt * 3 + Math.random() * 10);
+    }
+  }
+}
+
 export function createStore(db: Kysely<DB>): Store {
   return {
     read: buildTx(db),
-    tx: (fn) => db.transaction().execute((trx) => fn(buildTx(trx))),
+    tx: (fn) => runTx(db, fn),
     close: () => db.destroy(),
     async stats(now) {
       const count = async (table: 'publications' | 'announcements') => {
