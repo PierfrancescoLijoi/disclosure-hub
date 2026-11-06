@@ -37,7 +37,9 @@ With Docker Desktop running:
 npm run stack
 ```
 
-It builds and starts everything, waits until the app answers, then prints every address with what it is for (the table in
+On Windows, one command that needs no PowerShell setting: double-click **`stack.cmd`**, or type `stack` in a terminal in this folder (in
+PowerShell: `.\stack.cmd`). It installs the dependencies if they are missing, builds and starts everything quietly, waits until the app answers,
+then prints only the final result: every address with what it is for (the table in
 [Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure)). `npm run stack:down` stops it.
 
 **Windows PowerShell says "running scripts is disabled" (`npm.ps1` cannot be loaded)?** It is PowerShell's execution policy, not the
