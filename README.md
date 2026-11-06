@@ -38,8 +38,10 @@ npm run stack
 ```
 
 On Windows, one command that needs no PowerShell setting: double-click **`stack.cmd`**, or type `stack` in a terminal in this folder (in
-PowerShell: `.\stack.cmd`). It installs the dependencies if they are missing, builds and starts everything quietly, waits until the app answers,
-then prints only the final result: every address with what it is for (the table in
+PowerShell: `.\stack.cmd`). From a clean computer it sets itself up: it uses Node.js 22+ if present, otherwise downloads a portable copy into `.tools`
+(nothing is installed system-wide), downloads the dependencies with `npm install` (a no-op when they are there), then builds and starts
+everything, waits until the app answers, and prints the final result. The one thing it cannot install is **Docker Desktop**
+(administrator rights needed): <https://www.docker.com/products/docker-desktop/>. The result: every address with what it is for (the table in
 [Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure)). `npm run stack:down` stops it.
 
 **Windows PowerShell says "running scripts is disabled" (`npm.ps1` cannot be loaded)?** It is PowerShell's execution policy, not the
