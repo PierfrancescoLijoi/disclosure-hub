@@ -131,6 +131,7 @@ deployment) is stated in [BRIEF-RESPONSE §4](docs/BRIEF-RESPONSE.md#4-verified-
 | [docs/SUMMARY.md](docs/SUMMARY.md) | Architecture, key decisions, trade-offs, what is proven, what comes next: one page |
 | [docs/BRIEF-RESPONSE.md](docs/BRIEF-RESPONSE.md) | The three points of the brief, each with its claim, proof and limit; likely questions |
 | [Azure diagram](docs/diagrams/02-azure-architecture.drawio.png) | The target architecture on one picture |
+| [Scale it locally](#scale-it-locally) | Every container, how it scales on one machine, the limit, and what was run versus only designed |
 
 ### Additional details
 
@@ -261,6 +262,33 @@ Without a browser, drive the whole thing through the REST API (one announcement 
 npm run demo                              # npm start on http://localhost:3000, persona header
 AUTH=oidc npm run demo                    # the Compose stack, with a real bearer token per person (run npm install once on the host first)
 ```
+
+## Scale it locally
+
+The container stack (Mode 2) is the way to see scaling on one machine. Every process is the same image started with a different `ROLE`, so
+each part scales on its own; [the diagram](docs/diagrams/04-local-scaling.drawio.png) shows it on one page.
+
+| Container | Scales? | How | Limit | Status |
+|---|---|---|---|---|
+| `worker` (files to the newswire) | Yes, horizontally | `docker compose up -d --scale worker=3` | 6 workers: every worker is woken by every `NOTIFY`; past that, move the queue to Service Bus or Redis | **Run and measured:** 1 worker 9 publications/s, 3 workers 27/s, no duplicates (200 ms newswire) |
+| `api` | Stateless, so yes by design | Remove the fixed `ports` line of `api` in `docker-compose.yml`, then `--scale api=2` (`web` reaches it as `api:3000`) | The shared database; about 80 write requests/s per 0.5 vCPU | **Not run as replicas** |
+| `notifier`, `agents` (`ROLE=events`) | Yes: each delivery is claimed with a lease, so a second copy cannot double-send | `docker compose up -d --scale notifier=2` | Total of 6 event replicas; the outbox is polled every second | **Benchmark only** (outbox claim 110/s with 1 claimer, 180/s with 4), not run as replicas |
+| `postgres`, `web`, `keycloak`, `mailpit` | No, single instance on purpose | | `postgres` is the shared limit: every process holds a pool of 5 connections, so `(api + workers + events) x 5` must stay under `max_connections` (100). Three workers: 6 processes, at most 30 connections | Azure replaces them with managed services |
+| `migrate` | Runs once | | | |
+
+Show worker scaling in four steps (the stack needs `RATE_LIMIT_PER_MIN=0`, or the per-person limit throttles the benchmark):
+
+```bash
+RATE_LIMIT_PER_MIN=0 docker compose up --build -d --scale worker=1
+AUTH=oidc GATEWAY_LATENCY_MS=200 npm run bench
+RATE_LIMIT_PER_MIN=0 docker compose up -d --scale worker=3
+AUTH=oidc GATEWAY_LATENCY_MS=200 npm run bench
+```
+
+The first run prints about 9 published per second, the second about 27, with no duplicates. Watch it while it runs: `docker stats` for CPU per
+replica and `GET /metrics` for the age of the oldest publication waiting. One worker already has about 50 times the margin over the expected peak
+(0.17/s), so the point of scaling here is to show the mechanism, not to need it. The Azure numbers (2 workers about 15/s under Azure limits) are
+in [docs/SIZING.md](docs/SIZING.md); Azure itself was never applied.
 
 ## Throughput check
 

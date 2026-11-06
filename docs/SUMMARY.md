@@ -73,6 +73,7 @@ Adding a jurisdiction means writing only the right-hand column: one policy file,
 
 - **Verified by running it:** draft to published in all three jurisdictions; retries, lost acknowledgement, crash and
   takeover; 223 server tests on SQLite, with 7 PostgreSQL/Redis integration tests run by CI; real OIDC (Keycloak) in the container setup.
+- **Scaling on one machine:** every container, its limit and whether it was run are in the README section [Scale it locally](../README.md#scale-it-locally).
 - **Measured on a laptop with Azure resource limits:** about 15 publications per second with 2 workers against an expected
   peak of 0.17 per second ([SIZING.md](SIZING.md)).
 - **Designed, never applied:** the Azure Terraform. It is validated offline (42 mocked tests, lint and security scans), and
