@@ -1,6 +1,6 @@
 # Discovery ledger
 
-Domain: `fintech` (primary), `saas-b2b` + `ai-llm` (secondary). Client: Board Intelligence interview panel (homework).
+Domain: `fintech` (primary), `saas-b2b` + `ai-llm` (secondary).
 
 | Id | Item | State | Impact | Owner / next step |
 |---|---|---|---|---|
