@@ -18,39 +18,50 @@ jurisdictions (UK, US and Denmark), with one shared workflow and per-jurisdictio
 
 ## Run it in 30 seconds
 
-Two ways, from lightest to fullest. Use one at a time: both want port 3000, so stop the first (`Ctrl+C`, or `npm run stack:down`) before the second.
+Open a terminal **in the project folder** first (Windows: `cd C:\path\to\disclosure-hub`). Then pick one line. Use one version at a time: both
+want port 3000, so stop the first before starting the second.
 
-| | **A. Light** | **B. Full** |
+| I want | Windows (PowerShell or double-click) | Linux, macOS, Git Bash | Any system with Node |
+|---|---|---|---|
+| **Full version**, real sign-in, database, mail inbox (recommended) | `.\stack.cmd` | `sh bootstrap.sh --stack` | `npm run stack` |
+| **Light version**, one process, two minutes | `.\bootstrap.cmd` | `sh bootstrap.sh` | `npm install` then `npm start` |
+| Publish one announcement per country, no browser (with the light version running in another window) | `.\bootstrap.cmd -Demo` | `sh bootstrap.sh --demo` | `npm run demo` |
+| Stop the full version | `npm.cmd run stack:down` | `npm run stack:down` | `npm run stack:down` |
+
+The Windows and Linux/macOS commands in the first two rows **set themselves up**: they use Node.js 22+ if you have it, otherwise download a
+portable copy into `.tools` (nothing is installed system-wide), run `npm install`, and then start. The only thing they cannot install is
+**Docker Desktop**, which the full version needs (administrator rights): <https://www.docker.com/products/docker-desktop/>. Start it and
+wait until it says it is running. The light version needs no Docker.
+
+When it is ready, the last thing printed is the list of addresses, each with what it is for. This is the full version's list (the light one
+prints only the app address and the five people, with no password):
+
+| Open | What it is | Sign in |
 |---|---|---|
-| Command | `npm install` then `npm start` | `npm run stack` |
-| One command from a clean computer | Windows: double-click `bootstrap.cmd`. Linux, macOS: `sh bootstrap.sh` | Windows: double-click `stack.cmd`. Linux, macOS: `sh bootstrap.sh --stack` |
-| Needs | Node.js 22+ | Node.js 22+ and Docker Desktop (both are fetched for you, see below, except Docker) |
-| What you get | The whole workflow in one process, SQLite, a pick-a-persona sign-in | Real sign-in with Keycloak, PostgreSQL, separate worker, notifier and agents, a mail inbox |
-| Open | <http://localhost:3000> | <http://localhost:8080> |
-| Best for | Seeing draft to published in two minutes | Seeing the production-shaped system and how it scales |
+| <http://localhost:8080> | **The app** | `alice`, `bob`, `carol`, `dan`, `erin`, password `hub-dev-only` for all |
+| <http://localhost:8080/public/announcements> | What readers see | No sign-in |
+| <http://localhost:8025> | Mailpit, the inbox for every e-mail sent | No sign-in |
+| <http://localhost:8081> | Keycloak admin | `admin`, password `hub-dev-only` |
 
-**A. Light.** Sign in as **alice** (author), create a UK, US or Denmark announcement, press *Fill with example content*, and take it
-through *Validate*, *Submit for review*, three approvals (bob, carol, dan) and *Publish* (erin). The full walk-through is under
-[Try it](#try-it). Without a browser: `npm run demo` (with the app running) publishes one announcement per jurisdiction.
-No Node.js yet? Use the [bootstrap](#quick-start-from-a-clean-computer) (`bootstrap.cmd` or `sh bootstrap.sh`): it fetches what is missing,
-installs nothing system-wide, starts the app and prints the address with the people to sign in as.
+The light version is at <http://localhost:3000> and has no passwords: you pick a person on the sign-in page.
 
-**B. Full.** `npm run stack` builds and starts everything quietly, waits until the app answers, and prints the addresses to open, each with
-what it is for, plus every user name and password (the same table is in [Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure)).
-`stack.cmd` (Windows) and `sh bootstrap.sh --stack` (Linux, macOS) also set up a clean computer first: they use Node.js 22+ if present,
-otherwise download a portable copy into `.tools` (nothing is installed system-wide), and run `npm install`. Either way the last thing
-you see is the list of addresses, with user names and passwords. The one thing no script can install is **Docker Desktop** (administrator rights
-needed): <https://www.docker.com/products/docker-desktop/>. `npm run stack:down` stops it.
+**Take an announcement from draft to published (about two minutes):** sign in as **alice** (author), choose *New announcement*, pick the UK,
+the US or Denmark and a category, press *Fill with example content*, then *Validate* and *Submit for review*. Sign out and in as **bob**,
+**carol** and **dan** and approve. Sign in as **erin** and press *Publish*. Details: [Try it](#try-it).
 
-**Windows PowerShell says "running scripts is disabled" (`npm.ps1` cannot be loaded)?** It is PowerShell's execution policy, not the
-project. `stack.cmd` is not affected. For the `npm` commands, either call the `.cmd` version (`npm.cmd install`, `npm.cmd start`,
-`npm.cmd run stack`), or relax the policy for this window only (it resets when you close the terminal) and use `npm` as usual:
+**What `.\stack.cmd` runs, in order:** `scripts\bootstrap.ps1 -Stack` (Node and `npm install`), then `node scripts\stack.mjs`, which
+checks that Docker answers, runs `docker compose up --build -d` quietly, waits until the app responds, and prints the list above. The first
+build takes a few minutes. When started by double-click, the window waits for a key so you can read the list. To see Docker's own output
+add `--verbose`. Stop everything with `npm run stack:down` (add `-- -v` to also delete the data).
 
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
+**Something went wrong?**
 
-Command Prompt and Git Bash have no such restriction.
+| You see | Why | Do this |
+|---|---|---|
+| `npm.ps1 cannot be loaded ... running scripts is disabled` | PowerShell's script policy, not the project | `.\stack.cmd` and `.\bootstrap.cmd` are not affected. For `npm`, write `npm.cmd`, or run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` once in that window |
+| `EADDRINUSE ... 3000` | The other version, or something else, holds port 3000 | Stop it (`Ctrl+C`, or `npm run stack:down`), or `PORT=3001 npm start` |
+| `Docker is not available` | Docker Desktop is not installed or not running | Install and start it, wait for "running", repeat the command |
+| Full version slow the first time | It builds the images | Wait; later runs take seconds |
 
 **Reading order (about 10 minutes):** [docs/SUMMARY.md](docs/SUMMARY.md) (architecture, decisions, trade-offs, next steps on
 one page), then [docs/BRIEF-RESPONSE.md](docs/BRIEF-RESPONSE.md) (each point of the brief with its proof). Everything else is
