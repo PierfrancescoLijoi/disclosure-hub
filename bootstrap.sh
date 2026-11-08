@@ -6,6 +6,7 @@
 #
 #   sh bootstrap.sh              set up and start
 #   sh bootstrap.sh --no-start   prepare everything, do not start
+#   sh bootstrap.sh --stack      set up, then start the container stack (needs Docker) and print every address with user names and passwords
 #   sh bootstrap.sh --demo       with the app running in another terminal: publish one announcement in each jurisdiction (UK, US, Denmark) through the API
 set -eu
 
@@ -73,6 +74,20 @@ npm install --no-audit --no-fund || fail "npm install failed; read the lines abo
 
 step "3/3 Ready"
 if [ "${1:-}" = "--demo" ]; then exec npm run demo; fi
+if [ "${1:-}" = "--stack" ]; then exec node scripts/stack.mjs; fi
 if [ "${1:-}" = "--no-start" ]; then echo "Setup done. Start it later with: sh bootstrap.sh"; exit 0; fi
-echo "Starting. Open http://localhost:3000 in your browser. Stop with Ctrl+C."
+echo "Starting the light version. Open these in your browser:"
+cat <<'INFO'
+
+  http://localhost:3000
+      THE APP. Pick a person on the sign-in page; there is no password in this version.
+        alice  author      create, fill, validate, submit for review
+        bob    secretary   approve
+        carol  counsel     approve
+        dan    CFO         approve
+        erin   publisher   publish
+      Sign out and pick the next person at each step.
+
+Stop with Ctrl+C. For real sign-in, PostgreSQL and the mail inbox use: sh bootstrap.sh --stack
+INFO
 exec npm start

@@ -22,7 +22,8 @@ Two ways, from lightest to fullest. Use one at a time: both want port 3000, so s
 
 | | **A. Light** | **B. Full** |
 |---|---|---|
-| Command | `npm install` then `npm start` | `npm run stack` (Windows: double-click `stack.cmd`) |
+| Command | `npm install` then `npm start` | `npm run stack` |
+| One command from a clean computer | Windows: double-click `bootstrap.cmd`. Linux, macOS: `sh bootstrap.sh` | Windows: double-click `stack.cmd`. Linux, macOS: `sh bootstrap.sh --stack` |
 | Needs | Node.js 22+ | Node.js 22+ and Docker Desktop (both are fetched for you, see below, except Docker) |
 | What you get | The whole workflow in one process, SQLite, a pick-a-persona sign-in | Real sign-in with Keycloak, PostgreSQL, separate worker, notifier and agents, a mail inbox |
 | Open | <http://localhost:3000> | <http://localhost:8080> |
@@ -31,12 +32,14 @@ Two ways, from lightest to fullest. Use one at a time: both want port 3000, so s
 **A. Light.** Sign in as **alice** (author), create a UK, US or Denmark announcement, press *Fill with example content*, and take it
 through *Validate*, *Submit for review*, three approvals (bob, carol, dan) and *Publish* (erin). The full walk-through is under
 [Try it](#try-it). Without a browser: `npm run demo` (with the app running) publishes one announcement per jurisdiction.
-No Node.js yet? Use the [bootstrap](#quick-start-from-a-clean-computer), which installs nothing system-wide.
+No Node.js yet? Use the [bootstrap](#quick-start-from-a-clean-computer) (`bootstrap.cmd` or `sh bootstrap.sh`): it fetches what is missing,
+installs nothing system-wide, starts the app and prints the address with the people to sign in as.
 
 **B. Full.** `npm run stack` builds and starts everything quietly, waits until the app answers, and prints the addresses to open, each with
 what it is for, plus every user name and password (the same table is in [Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure)).
-On Windows `stack.cmd` also sets up a clean computer: it uses Node.js 22+ if present, otherwise downloads a portable copy into `.tools`
-(nothing is installed system-wide), and runs `npm install`. The one thing no script can install is **Docker Desktop** (administrator rights
+`stack.cmd` (Windows) and `sh bootstrap.sh --stack` (Linux, macOS) also set up a clean computer first: they use Node.js 22+ if present,
+otherwise download a portable copy into `.tools` (nothing is installed system-wide), and run `npm install`. Either way the last thing
+you see is the list of addresses, with user names and passwords. The one thing no script can install is **Docker Desktop** (administrator rights
 needed): <https://www.docker.com/products/docker-desktop/>. `npm run stack:down` stops it.
 
 **Windows PowerShell says "running scripts is disabled" (`npm.ps1` cannot be loaded)?** It is PowerShell's execution policy, not the
@@ -84,7 +87,8 @@ On Windows, a ZIP downloaded from the internet may make a *Windows protected you
 double-click `bootstrap.cmd`: choose *More info*, then *Run anyway*. The script is plain text; read it first if you wish.
 
 Run the same command again later to start it; it will not download anything twice. To only prepare it without starting:
-`bootstrap.cmd -NoStart` (Windows) or `sh bootstrap.sh --no-start`. To remove everything, delete the folder.
+`bootstrap.cmd -NoStart` (Windows) or `sh bootstrap.sh --no-start`. To set up and start the full container version instead:
+`bootstrap.cmd -Stack` or `sh bootstrap.sh --stack` (same as `stack.cmd`). To remove everything, delete the folder.
 
 Needs: **Windows** with PowerShell (built in); **Linux or macOS** with `sh`, `tar`, and `curl` or `wget`. The bootstrap
 stops with a clear message if one is missing, if the download is blocked (a proxy or a firewall), or if a checksum does not

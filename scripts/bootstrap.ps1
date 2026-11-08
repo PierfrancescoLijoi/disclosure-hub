@@ -66,7 +66,20 @@ try {
   if ($Stack) { & node (Join-Path $Root 'scripts\stack.mjs'); exit $LASTEXITCODE }
   if ($Demo) { & npm.cmd run demo; exit $LASTEXITCODE }
   if ($NoStart) { Write-Host "Setup done. Start it later with bootstrap.cmd."; exit 0 }
-  Write-Host "Starting. Open http://localhost:3000 in your browser. Stop with Ctrl+C."
+  Write-Host "Starting the light version. Open these in your browser:"
+  Write-Host @"
+
+  http://localhost:3000
+      THE APP. Pick a person on the sign-in page; there is no password in this version.
+        alice  author      create, fill, validate, submit for review
+        bob    secretary   approve
+        carol  counsel     approve
+        dan    CFO         approve
+        erin   publisher   publish
+      Sign out and pick the next person at each step.
+
+Stop with Ctrl+C. For real sign-in, PostgreSQL and the mail inbox use: stack.cmd
+"@
   & npm.cmd start
   exit $LASTEXITCODE
 } catch {
