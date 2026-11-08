@@ -59,7 +59,7 @@ add `--verbose`. Stop everything with `npm run stack:down` (add `-- -v` to also 
 | You see | Why | Do this |
 |---|---|---|
 | `npm.ps1 cannot be loaded ... running scripts is disabled` | PowerShell's script policy, not the project | `.\stack.cmd` and `.\bootstrap.cmd` are not affected. For `npm`, write `npm.cmd`, or run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` once in that window |
-| `EADDRINUSE ... 3000` | The other version, or something else, holds port 3000 | Stop it (`Ctrl+C`, or `npm run stack:down`), or `PORT=3001 npm start` |
+| `EADDRINUSE ... 3000` | The other version, or something else, holds port 3000 | Stop it (`Ctrl+C`, or `npm run stack:down`), or use another port (see "Port 3000 is taken?" below) |
 | `Docker is not available` | Docker Desktop is not installed or not running | Install and start it, wait for "running", repeat the command |
 | Full version slow the first time | It builds the images | Wait; later runs take seconds |
 
@@ -92,7 +92,7 @@ It runs three steps and prints each one (`1/3`, `2/3`, `3/3`):
    is installed system-wide, no administrator rights are used, and your PATH is not changed.
 2. **Dependencies.** Runs `npm install`. They are ready-made, so no compiler or Python is needed.
 3. **Start.** Builds the web app, creates a local SQLite database in `apps/server/data/`, seeds demo companies and people,
-   and starts the app. When it prints `Open http://localhost:3000`, open that address in a browser.
+   and starts the app. It then prints the address (<http://localhost:3000>) and the five people to sign in as; open the address in a browser.
 
 On Windows, a ZIP downloaded from the internet may make a *Windows protected your PC* (SmartScreen) window appear when you
 double-click `bootstrap.cmd`: choose *More info*, then *Run anyway*. The script is plain text; read it first if you wish.
