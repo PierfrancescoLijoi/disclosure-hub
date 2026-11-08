@@ -18,46 +18,33 @@ jurisdictions (UK, US and Denmark), with one shared workflow and per-jurisdictio
 
 ## Run it in 30 seconds
 
-With Node.js 22 or newer:
+Two ways, from lightest to fullest. Use one at a time: both want port 3000, so stop the first (`Ctrl+C`, or `npm run stack:down`) before the second.
 
-```bash
-npm install
-npm start          # open http://localhost:3000
-```
+| | **A. Light** | **B. Full** |
+|---|---|---|
+| Command | `npm install` then `npm start` | `npm run stack` (Windows: double-click `stack.cmd`) |
+| Needs | Node.js 22+ | Node.js 22+ and Docker Desktop (both are fetched for you, see below, except Docker) |
+| What you get | The whole workflow in one process, SQLite, a pick-a-persona sign-in | Real sign-in with Keycloak, PostgreSQL, separate worker, notifier and agents, a mail inbox |
+| Open | <http://localhost:3000> | <http://localhost:8080> |
+| Best for | Seeing draft to published in two minutes | Seeing the production-shaped system and how it scales |
 
-Then sign in as **alice** (author), create a UK, US or Denmark announcement, press *Fill with example content*, and take it
+**A. Light.** Sign in as **alice** (author), create a UK, US or Denmark announcement, press *Fill with example content*, and take it
 through *Validate*, *Submit for review*, three approvals (bob, carol, dan) and *Publish* (erin). The full walk-through is under
 [Try it](#try-it). Without a browser: `npm run demo` (with the app running) publishes one announcement per jurisdiction.
-No Node.js yet? Use the bootstrap below, which installs nothing system-wide.
+No Node.js yet? Use the [bootstrap](#quick-start-from-a-clean-computer), which installs nothing system-wide.
 
-**Want the full experience** (real sign-in with Keycloak, PostgreSQL, separate worker, notifier and agents, a mail inbox)?
-With Docker Desktop running:
-
-```bash
-npm run stack
-```
-
-On Windows, one command that needs no PowerShell setting: double-click **`stack.cmd`**, or type `stack` in a terminal in this folder (in
-PowerShell: `.\stack.cmd`). From a clean computer it sets itself up: it uses Node.js 22+ if present, otherwise downloads a portable copy into `.tools`
-(nothing is installed system-wide), downloads the dependencies with `npm install` (a no-op when they are there), then builds and starts
-everything, waits until the app answers, and prints the final result. The one thing it cannot install is **Docker Desktop**
-(administrator rights needed): <https://www.docker.com/products/docker-desktop/>. The result: every address with what it is for (the table in
-[Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure)). `npm run stack:down` stops it.
+**B. Full.** `npm run stack` builds and starts everything quietly, waits until the app answers, and prints the addresses to open, each with
+what it is for, plus every user name and password (the same table is in [Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure)).
+On Windows `stack.cmd` also sets up a clean computer: it uses Node.js 22+ if present, otherwise downloads a portable copy into `.tools`
+(nothing is installed system-wide), and runs `npm install`. The one thing no script can install is **Docker Desktop** (administrator rights
+needed): <https://www.docker.com/products/docker-desktop/>. `npm run stack:down` stops it.
 
 **Windows PowerShell says "running scripts is disabled" (`npm.ps1` cannot be loaded)?** It is PowerShell's execution policy, not the
-project. Either call the `.cmd` version:
-
-```powershell
-npm.cmd install
-npm.cmd start
-```
-
-or relax the policy for this window only (it resets when you close the terminal), then use `npm` as usual:
+project. `stack.cmd` is not affected. For the `npm` commands, either call the `.cmd` version (`npm.cmd install`, `npm.cmd start`,
+`npm.cmd run stack`), or relax the policy for this window only (it resets when you close the terminal) and use `npm` as usual:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-npm install
-npm start
 ```
 
 Command Prompt and Git Bash have no such restriction.
@@ -68,7 +55,7 @@ under [Additional details](#additional-details).
 
 ## Quick start from a clean computer
 
-Nothing needs to be installed first: no Node.js, no Git, no database, no Docker, no compiler, no Python, no account, no API
+This is way A (light). Nothing needs to be installed first: no Node.js, no Git, no database, no Docker, no compiler, no Python, no account, no API
 key. You need the code folder and an internet connection.
 
 ### 1. Get the code
