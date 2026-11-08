@@ -18,7 +18,7 @@ Map of all the other documents: [README, "Documentation map"](../README.md#docum
 
 ## 0. A working system
 
-**Run it** (needs Node 22+; details in the [README](../README.md#run-it)):
+**Run it** (needs a supported Node release: 22.12+, 24+, or 26+; details in the [README](../README.md#run-it)):
 
 ```bash
 npm install

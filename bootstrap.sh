@@ -1,6 +1,6 @@
 #!/bin/sh
 # Disclosure Hub: set up and start on a Linux or macOS computer that has nothing installed.
-# Needs no Git, no root and no system changes: if Node.js 22+ is missing it downloads the official portable Node into
+# Needs no Git, no root and no system changes: if a supported Node.js release is missing it downloads the official portable Node into
 # .tools/node (inside this folder), checks its SHA-256, installs the dependencies and starts the app.
 # Needs only: sh, tar, and curl or wget.
 #
@@ -10,8 +10,8 @@
 #   sh bootstrap.sh --demo       with the app running in another terminal: publish one announcement in each jurisdiction (UK, US, Denmark) through the API
 set -eu
 
-NODE_VERSION=22.23.4   # the version this was tested with; any Node 22 or newer works
-MIN_MAJOR=22
+NODE_VERSION=22.23.4   # portable version used when the computer has no supported Node
+SUPPORTED_NODE_LABEL='22.12+, 24+, or 26+'
 cd "$(dirname "$0")"
 ROOT=$(pwd)
 
@@ -20,8 +20,7 @@ fail() { printf '\nSetup failed: %s\nSee README.md, section "Quick start".\n' "$
 
 node_ok() {
   command -v node >/dev/null 2>&1 || return 1
-  major=$(node -v | sed 's/^v//; s/\..*//')
-  [ "$major" -ge "$MIN_MAJOR" ] 2>/dev/null
+  node -e "const [major,minor,patch]=process.versions.node.split('.').map(Number); process.exit((major===22&&(minor>12||minor===12&&patch>=0))||major===24||major>=26?0:1)"
 }
 
 fetch() { # url, output file
@@ -39,9 +38,9 @@ sha256_of() {
 }
 
 install_portable_node() {
-  case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) fail "unsupported system $(uname -s); install Node.js 22+ from https://nodejs.org" ;; esac
-  case "$(uname -m)" in x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) fail "unsupported CPU $(uname -m); install Node.js 22+ from https://nodejs.org" ;; esac
-  if [ "$os" = linux ] && ls /lib/ld-musl-* >/dev/null 2>&1; then fail "this Linux uses musl (for example Alpine); install Node.js 22+ with your package manager"; fi
+  case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) fail "unsupported system $(uname -s); install supported Node.js ($SUPPORTED_NODE_LABEL) from https://nodejs.org" ;; esac
+  case "$(uname -m)" in x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) fail "unsupported CPU $(uname -m); install supported Node.js ($SUPPORTED_NODE_LABEL) from https://nodejs.org" ;; esac
+  if [ "$os" = linux ] && ls /lib/ld-musl-* >/dev/null 2>&1; then fail "this Linux uses musl (for example Alpine); install supported Node.js ($SUPPORTED_NODE_LABEL) with your package manager"; fi
   file="node-v$NODE_VERSION-$os-$arch.tar.gz"
   base="https://nodejs.org/dist/v$NODE_VERSION"
   mkdir -p .tools
@@ -58,7 +57,7 @@ install_portable_node() {
   rm -f ".tools/$file" .tools/SHASUMS256.txt
 }
 
-step "1/3 Node.js $MIN_MAJOR or newer"
+step "1/3 Supported Node.js ($SUPPORTED_NODE_LABEL)"
 [ -x .tools/node/bin/node ] && PATH="$ROOT/.tools/node/bin:$PATH"
 if node_ok; then
   echo "Found Node $(node -v)"

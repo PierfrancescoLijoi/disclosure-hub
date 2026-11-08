@@ -1,5 +1,5 @@
 # Disclosure Hub: set up and start on a Windows computer that has nothing installed.
-# Needs no Git, no admin rights and no changes to the system: if Node.js 22+ is missing it downloads the official
+# Needs no Git, no admin rights and no changes to the system: if a supported Node.js release is missing it downloads the official
 # portable Node into .tools\node (inside this folder), checks its SHA-256, installs the dependencies and starts the app.
 #
 #   bootstrap.cmd              double-click it, or run it from a terminal
@@ -12,15 +12,18 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # progress bars make Invoke-WebRequest very slow in Windows PowerShell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$NodeVersion = '22.23.4'   # the version this was tested with; any Node 22 or newer works
-$MinMajor = 22
+$NodeVersion = '22.23.4'   # portable version used when the computer has no supported Node
+$SupportedNodeLabel = '22.12+, 24+, or 26+'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 
 function Test-Node {
-  try { $v = (& node -v) 2>$null; return [int]($v.TrimStart('v').Split('.')[0]) -ge $MinMajor } catch { return $false }
+  try {
+    $version = [version]((& node -v) 2>$null).TrimStart('v')
+    return (($version.Major -eq 22 -and $version -ge [version]'22.12.0') -or $version.Major -eq 24 -or $version.Major -ge 26)
+  } catch { return $false }
 }
 
 function Get-Sha256([string]$Path) {
@@ -61,7 +64,7 @@ function Install-PortableNode {
 }
 
 try {
-  Step "1/3 Node.js $MinMajor or newer"
+  Step "1/3 Supported Node.js ($SupportedNodeLabel)"
   $local = Join-Path $Root '.tools\node'
   if (Test-Path (Join-Path $local 'node.exe')) { $env:PATH = "$local;$env:PATH" }
   if (Test-Node) {

@@ -338,11 +338,12 @@ There are three ways to run the *same* code. Only the adapters change (environme
 ### Mode 1 in practice
 
 From an empty computer: download the ZIP, double-click `bootstrap.cmd` (Windows) or run `sh bootstrap.sh` (Linux/macOS). The
-script looks for Node 22 or newer; if it is missing it downloads the official portable Node into `.tools/node` inside the folder,
-checks its SHA-256 against the list from nodejs.org, then runs `npm install` and starts. It needs no administrator rights, does
-not change the PATH and installs nothing system-wide. Open `http://localhost:3000`. The reason for Node ≥22 is that
-`better-sqlite3` ships prebuilt binaries only from Node 22 up; with Node 20 it would have to be compiled (Python and a C++
-toolchain needed), so the project refuses it with a clear message (`engines.node >=22` plus `engine-strict`).
+script looks for a supported Node release (22.12+, 24+, or 26+); if it is missing it downloads the official portable Node into `.tools/node` inside the
+folder, checks its SHA-256 against the list from nodejs.org, then runs `npm install` and starts. It needs no administrator rights,
+does not change the PATH and installs nothing system-wide. Open `http://localhost:3000`. These release lines match the current
+test runner and the releases for which `better-sqlite3` supplies ready-made binaries. Older or unsupported releases could
+require Python and a C++ toolchain, so the project refuses them with a clear message (`engines.node ^22.12.0 || ^24.0.0 || >=26.0.0` plus
+`engine-strict`).
 
 To try it: choose **alice** on the sign-in page, create a UK, US or DK announcement, press "Fill with example content", save,
 **Validate**, **Submit for review**. Then enter as **bob**, **carol**, **dan** to approve and as **erin** to publish. The **Mock
@@ -365,13 +366,13 @@ for each person (run `npm install` once on the host first).
 
 | What | Command |
 |---|---|
-| Full start | `bootstrap.cmd` or `sh bootstrap.sh` |
+| Full container start | `stack.cmd` or `bootstrap.cmd -Stack` on Windows; `sh bootstrap.sh --stack` on Linux/macOS |
 | Prepare only | `bootstrap.cmd -NoStart` / `sh bootstrap.sh --no-start` |
 | Demo through the API | `npm run demo` (or `bootstrap.cmd -Demo`) |
 | Tests | `npm test` (224 server plus 12 web), `npm run typecheck` |
 | Benchmark | `npm run bench`, `npm run bench:readers -w apps/server` |
 | Start from scratch | delete `apps/server/data/` |
-| Another port | `PORT=3001 npm start` (PowerShell: `$env:PORT=3001; npm start`) |
+| Another port | `PORT=3001 npm start` (PowerShell: `$env:PORT=3001; npm.cmd start`) |
 
 ### The UI
 
@@ -575,10 +576,10 @@ Cut in this order to protect the complete flow, the quality of the tests and the
 |---|---|
 | Draft→published in the UK, US and Denmark, from the UI, the REST demo and the tests | **Verified by running it** |
 | Retries, exhaustion, permanent rejection, lost acknowledgement, lease takeover after a crash, recovery of a lost wake-up | **Verified** (tests) |
-| 224 tests on SQLite; 7 gated integration tests run in CI with PostgreSQL 16 + Redis 7, including two worker processes with no double release | **Verified locally except the gated adapter tests; CI verifies the full 226** |
+| 224 tests on SQLite; 7 gated integration tests run in CI with PostgreSQL 16 + Redis 7, including two worker processes with no double release | **Verified locally except the gated adapter tests; CI verifies all 231 server tests** |
 | OIDC with Keycloak, Authorization Code + PKCE from a real browser | **Verified** |
 | Compose twin: separate api, worker, notifier, agents; mail delivered to Mailpit; nginx cache | **Verified** |
-| Bootstrap from scratch on Windows and Linux (Node 22.12/22.23.4/24, refusal of Node 18/20, Docker from a fresh clone) | **Verified**; macOS, Docker on a Linux host and a truly clean Windows **not** tried |
+| Bootstrap from scratch on Windows and Linux (Node 22.12/22.23.4/24, refusal of Node 18/20, portable Node on a clean Windows, Docker from a fresh clone) | **Verified**; macOS and Docker on a Linux host were not tried |
 | Independent code and security review | Done; fixed: auth decided on the route (an encoded path such as `/%61pi/` skipped it), persona auth refused with `DEMO=0`, malformed cursor → 400, approval bound to the revision, race on publish → 409, timeouts and crash after the claim, Compose ports on localhost |
 | Throughput and latency numbers | **Measured** on a laptop with Azure limits |
 | Azure Terraform | **Designed**; validate, tflint, trivy, checkov and 42 tests with mocks pass; **never applied** |

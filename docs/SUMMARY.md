@@ -9,7 +9,7 @@ Investor-relations software that takes a regulatory announcement from **draft to
 jurisdictions: **UK** (RNS, UK MAR), **US** (EDGAR, Form 8-K, Reg FD) and **Denmark** (Nasdaq Copenhagen, EU MAR). The
 newswires are mocks; everything else runs: UI, API, approvals, publishing, audit, public archive, subscriptions.
 
-Run it: `npm install && npm start`, then open <http://localhost:3000> ([details](../README.md#run-it-in-30-seconds)).
+Run it: run `npm install`, then `npm start`, and open <http://localhost:3000> ([platform-specific details](../README.md#choose-how-to-run-it)).
 
 ## Architecture
 

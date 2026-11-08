@@ -16,7 +16,7 @@ jurisdictions (UK, US and Denmark), with one shared workflow and per-jurisdictio
 > counsel and the real channel integrations. All three newswires are mocks. Sign-in is real OIDC in the container and Azure
 > setups (Keycloak locally, Microsoft Entra ID on Azure); the light bootstrap uses seeded personas for a zero-configuration demo.
 
-## Run it in 30 seconds
+## Choose how to run it
 
 Open a terminal **in the project folder** first (Windows: `cd C:\path\to\disclosure-hub`). Then pick one line. Use one version at a time: both
 want port 3000, so stop the first before starting the second.
@@ -28,7 +28,8 @@ want port 3000, so stop the first before starting the second.
 | Publish one announcement per country, no browser (with the light version running in another window) | `.\bootstrap.cmd -Demo` | `sh bootstrap.sh --demo` | `npm run demo` |
 | Stop the full version | `npm.cmd run stack:down` | `npm run stack:down` | `npm run stack:down` |
 
-The Windows and Linux/macOS commands in the first two rows **set themselves up**: they use Node.js 22+ if you have it, otherwise download a
+The Windows and Linux/macOS commands in the first two rows **set themselves up**: they use a supported Node.js release
+(22.12+, 24+, or 26+) if you have it, otherwise download a
 portable copy into `.tools` (nothing is installed system-wide), run `npm install`, and then start. The only thing they cannot install is
 **Docker Desktop**, which the full version needs (administrator rights): <https://www.docker.com/products/docker-desktop/>. Start it and
 wait until it says it is running. The light version needs no Docker.
@@ -87,7 +88,7 @@ No access? Ask the Author to invite your GitHub account, or use the ZIP you were
 
 It runs three steps and prints each one (`1/3`, `2/3`, `3/3`):
 
-1. **Node.js.** Looks for Node.js 22 or newer. If it is missing, it downloads the official portable Node.js from
+1. **Node.js.** Looks for a supported release (22.12+, 24+, or 26+). If it is missing, it downloads the official portable Node.js from
    nodejs.org into `.tools/node` **inside this folder** and checks its SHA-256 against nodejs.org's published list. Nothing
    is installed system-wide, no administrator rights are used, and your PATH is not changed.
 2. **Dependencies.** Runs `npm install`. They are ready-made, so no compiler or Python is needed.
@@ -105,24 +106,24 @@ Needs: **Windows** with PowerShell (built in); **Linux or macOS** with `sh`, `ta
 stops with a clear message if one is missing, if the download is blocked (a proxy or a firewall), or if a checksum does not
 match. In that case use the manual route below.
 
-**Clean-computer paths verified on 8 November 2026:** Windows with Node 22+ already present; Windows with no Node (the
-bootstrap downloaded Node 22.23.4, verified its published SHA-256 and used it from `.tools/node`); Linux with Node 22+;
+**Clean-computer paths verified on 8 November 2026:** Windows with a supported Node release already present; Windows with no Node (the
+bootstrap downloaded Node 22.23.4, verified its published SHA-256 and used it from `.tools/node`); Linux with Node 22.22.1;
 and the full Docker Desktop stack. The light and container routes both completed one UK, one US and one Danish
 draft-to-published journey. macOS and the portable-Node path on Linux/macOS follow the same script but were not run on
 those operating systems, so use the manual route if a local download policy blocks them.
 
 #### Manual route (if you prefer, or the bootstrap cannot download)
 
-Install **Node.js 22 or newer** (the current LTS from <https://nodejs.org>) and check it:
+Install a **currently supported Node.js LTS release** from <https://nodejs.org> (22.12+, 24+, or 26+) and check it:
 
 ```bash
 node -v
 ```
 
-It must print `v22` or higher. **Node 20 or older is refused** with an `EBADENGINE` message that names the required
-version, because the SQLite driver (`better-sqlite3`) ships ready-made binaries for Node 22 and newer only: older versions
-would have to compile it, which needs Python and a C++ toolchain (Visual Studio Build Tools on Windows). Then, in the
-code folder:
+It must print a supported version: `v22.12+`, `v24+`, or `v26+`. Other releases are refused with an `EBADENGINE` message
+that names the requirement: the current test runner requires these release lines, and the SQLite driver (`better-sqlite3`) supplies ready-made
+binaries for supported Node releases. Using an unsupported release could require Python and a C++ toolchain (Visual
+Studio Build Tools on Windows). Then, in the code folder:
 
 | Windows PowerShell | Linux, macOS, Git Bash |
 |---|---|
@@ -141,7 +142,8 @@ npm run demo
 
 It publishes one announcement in each jurisdiction (UK, US, Denmark) through the REST API and prints the acknowledgements and the audit-chain check.
 
-**Stop** with `Ctrl+C`. **Start from scratch** by deleting the `apps/server/data/` folder. **Run the tests** with `npm test`.
+**Stop** with `Ctrl+C`. **Start from scratch** by deleting the `apps/server/data/` folder. **Run the tests** with
+`npm.cmd test` in Windows PowerShell or `npm test` on Linux, macOS and Git Bash.
 
 **Port 3000 is taken?** Choose another one: `PORT=3001 npm start` (macOS, Linux, Git Bash) or
 `$env:PORT=3001; npm.cmd start` (PowerShell), and open that port.
@@ -232,7 +234,7 @@ The same container image and the same business logic run in all three; environme
 
 ### Mode 1: local (SQLite, one process)
 
-This is what the [Quick start](#quick-start-from-a-clean-computer) runs. With Node 22 or newer already installed it is
+This is what the [Quick start](#quick-start-from-a-clean-computer) runs. With a supported Node release already installed it is
 just `npm install` then `npm start`, and the app is on <http://localhost:3000>. SQLite file in `apps/server/data/`,
 in-process job queue, one process.
 For development, `npm run dev` runs the server with reload and `npm run dev -w apps/web` serves the UI on
@@ -241,8 +243,9 @@ For development, `npm run dev` runs the server with reload and `npm run dev -w a
 ### Mode 2: containers, PostgreSQL, real sign-in (the local twin of Azure)
 
 Needs **Docker Desktop** (or Docker Engine with the Compose plugin) running, and the ports 3000, 8080, 8081 and 8025 free.
-You do not need Node for this mode. The first build takes about two minutes (it pulls the base images and builds one image
-for every role).
+You do not need Node if you run `docker compose up --build -d` directly. The helper commands below use Node; `stack.cmd`
+on Windows and `sh bootstrap.sh --stack` on Linux/macOS install a portable copy automatically when it is missing. The
+first build takes about two minutes (it pulls the base images and builds one image for every role).
 
 ```bash
 npm run stack          # builds, starts, waits until ready, prints the addresses below
