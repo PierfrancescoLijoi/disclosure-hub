@@ -23,6 +23,18 @@ function Test-Node {
   try { $v = (& node -v) 2>$null; return [int]($v.TrimStart('v').Split('.')[0]) -ge $MinMajor } catch { return $false }
 }
 
+function Get-Sha256([string]$Path) {
+  # Use .NET directly: Get-FileHash is not available in every Windows PowerShell session.
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $stream.Dispose()
+    $sha.Dispose()
+  }
+}
+
 function Install-PortableNode {
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
   $file = "node-v$NodeVersion-win-$arch.zip"
@@ -34,9 +46,11 @@ function Install-PortableNode {
   Write-Host "Downloading $file from nodejs.org (about 30 MB)..."
   Invoke-WebRequest "$base/$file" -OutFile $zip -UseBasicParsing
   $sums = (Invoke-WebRequest "$base/SHASUMS256.txt" -UseBasicParsing).Content -split "`n"
-  $expected = ($sums | Where-Object { $_ -match [regex]::Escape($file) } | Select-Object -First 1).Split(' ')[0].Trim()
-  $actual = (Get-FileHash $zip -Algorithm SHA256).Hash
-  if (-not $expected -or $expected -ne $actual.ToLower()) { Remove-Item $zip -Force; throw "Checksum mismatch for $file; download discarded." }
+  $sumLine = $sums | Where-Object { $_ -match "\s$([regex]::Escape($file))`$" } | Select-Object -First 1
+  if (-not $sumLine) { Remove-Item $zip -Force; throw "No checksum published for $file; download discarded." }
+  $expected = ($sumLine -split '\s+')[0].ToLowerInvariant()
+  $actual = Get-Sha256 $zip
+  if ($expected -ne $actual) { Remove-Item $zip -Force; throw "Checksum mismatch for $file; download discarded." }
   Write-Host "Checksum OK."
 
   $target = Join-Path $tools 'node'

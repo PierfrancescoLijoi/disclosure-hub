@@ -357,7 +357,8 @@ Denmark) through the API and prints the receipts and the audit-chain check.
 You need Docker Desktop and ports 3000, 8080, 8081 and 8025 free. The first build takes about two minutes. Open
 `http://localhost:8080`; the users are the same names (alice, bob, carol, dan, erin) with a local demo password defined in the
 Keycloak realm. Services: `postgres`, `keycloak`, `migrate` (once), `api`, `worker`, `notifier`, `agents`, `mailpit`, `web`. For
-more publishing capacity: `docker compose up --build --scale worker=2`. With `AUTH=oidc npm run demo` the demo uses a real token
+more publishing capacity: `docker compose up --build --scale worker=2`. With `AUTH=oidc npm run demo` on Linux/macOS or
+`$env:AUTH='oidc'; npm.cmd run demo` in Windows PowerShell, the demo uses a real token
 for each person (run `npm install` once on the host first).
 
 ### Commands you need

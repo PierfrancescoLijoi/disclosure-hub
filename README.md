@@ -14,7 +14,7 @@ jurisdictions (UK, US and Denmark), with one shared workflow and per-jurisdictio
 > **The rules are simplified models, not legal advice.** They show how jurisdiction logic is
 > expressed and enforced, and they are only as good as their stated sources. Real use needs review by
 > counsel and the real channel integrations. All three newswires are mocks. Sign-in is real OIDC in the container and Azure
-> setups (Keycloak locally, Microsoft Entra ID on Azure); `npm start` uses seeded personas for a zero-install demo.
+> setups (Keycloak locally, Microsoft Entra ID on Azure); the light bootstrap uses seeded personas for a zero-configuration demo.
 
 ## Run it in 30 seconds
 
@@ -105,7 +105,13 @@ Needs: **Windows** with PowerShell (built in); **Linux or macOS** with `sh`, `ta
 stops with a clear message if one is missing, if the download is blocked (a proxy or a firewall), or if a checksum does not
 match. In that case use the manual route below.
 
-#### Manual route for step 2 (if you prefer, or the bootstrap cannot download)
+**Clean-computer paths verified on 8 November 2026:** Windows with Node 22+ already present; Windows with no Node (the
+bootstrap downloaded Node 22.23.4, verified its published SHA-256 and used it from `.tools/node`); Linux with Node 22+;
+and the full Docker Desktop stack. The light and container routes both completed one UK, one US and one Danish
+draft-to-published journey. macOS and the portable-Node path on Linux/macOS follow the same script but were not run on
+those operating systems, so use the manual route if a local download policy blocks them.
+
+#### Manual route (if you prefer, or the bootstrap cannot download)
 
 Install **Node.js 22 or newer** (the current LTS from <https://nodejs.org>) and check it:
 
@@ -116,12 +122,12 @@ node -v
 It must print `v22` or higher. **Node 20 or older is refused** with an `EBADENGINE` message that names the required
 version, because the SQLite driver (`better-sqlite3`) ships ready-made binaries for Node 22 and newer only: older versions
 would have to compile it, which needs Python and a C++ toolchain (Visual Studio Build Tools on Windows). Then, in the
-code folder (the same commands on Windows PowerShell, macOS and Linux):
+code folder:
 
-```bash
-npm install
-npm start
-```
+| Windows PowerShell | Linux, macOS, Git Bash |
+|---|---|
+| `npm.cmd install` | `npm install` |
+| `npm.cmd start` | `npm start` |
 
 ### 3. Use it
 
@@ -138,7 +144,7 @@ It publishes one announcement in each jurisdiction (UK, US, Denmark) through the
 **Stop** with `Ctrl+C`. **Start from scratch** by deleting the `apps/server/data/` folder. **Run the tests** with `npm test`.
 
 **Port 3000 is taken?** Choose another one: `PORT=3001 npm start` (macOS, Linux, Git Bash) or
-`$env:PORT=3001; npm start` (PowerShell), and open that port.
+`$env:PORT=3001; npm.cmd start` (PowerShell), and open that port.
 
 Want the production-shaped setup (PostgreSQL, real sign-in with Keycloak, separate worker, notifier and agent processes)?
 That needs **Docker Desktop**: see [Mode 2](#mode-2-containers-postgresql-real-sign-in-the-local-twin-of-azure). Azure is
@@ -317,10 +323,13 @@ arrives; the retry finds the earlier filing instead of sending a duplicate).
 
 Without a browser, drive the whole thing through the REST API (one announcement per jurisdiction):
 
-```bash
-npm run demo                              # npm start on http://localhost:3000, persona header
-AUTH=oidc npm run demo                    # the Compose stack, with a real bearer token per person (run npm install once on the host first)
-```
+| Running version | Windows PowerShell | Linux, macOS, Git Bash |
+|---|---|---|
+| Light (`npm start`) | `npm.cmd run demo` | `npm run demo` |
+| Compose, real OIDC | `$env:AUTH='oidc'; npm.cmd run demo` | `AUTH=oidc npm run demo` |
+
+The Compose demo gets a real bearer token for each person from Keycloak. Run `npm install` once on the host first; the
+demo command uses the host's Node process to call the container stack on `http://localhost:8080`.
 
 ## Scale it locally
 
@@ -509,7 +518,7 @@ docs/             brief response, requirements, glossary, architecture write-up,
 ## Assumptions and deviations
 
 - Vite + React for the UI instead of Next.js: nothing here needs server rendering.
-- `npm start` keeps seeded personas so it runs with nothing installed; Compose and Azure use real OIDC. The company a person acts for is one default per deployment unless the token carries it.
+- The light bootstrap installs what it needs inside the folder and `npm start` uses seeded personas; Compose and Azure use real OIDC. The company a person acts for is one default per deployment unless the token carries it.
 - Azure Terraform is not applied (no subscription was available); see `infra/azure/README.md` for the checklist the first deploy must run.
 - Regulatory model, in short: the UK PDMR deadline runs from the transaction (MAR Art. 19(3)); inside information is released even when the RNS window is closed; the US issuer profile has a filer status (domestic filers file Form 8-K, foreign private issuers Form 6-K); an 8-K with only Items 7.01 or 8.01 has no deadline; Item 1.05 counts from the materiality determination. What is not modelled (corrections, dual listing, insider lists, closed periods, TR-1, 10-Q/10-K, scheduled release) and what must be verified against a real provider (no idempotency lookup at real RIS or EDGAR, EDGAR Next credentials) is at the end of `discovery/spec.md`.
 - Rule sources are named in code comments next to each rule. Scheduling and embargo, attachments, iXBRL, translations and real newswire connections are out of scope (see the write-up).
